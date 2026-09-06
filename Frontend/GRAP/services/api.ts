@@ -2,8 +2,6 @@ import { safeStorage } from './storage';
 
 const API_BASE_URL = 'https://mygrap.onrender.com/api';
 
-export const API_BASE_URL = getBackendUrl();
-
 
 export interface User {
   id: number;
