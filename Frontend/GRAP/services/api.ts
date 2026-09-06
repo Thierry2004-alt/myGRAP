@@ -1,23 +1,6 @@
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 import { safeStorage } from './storage';
 
-const isWeb = Platform.OS === 'web';
-
-const getBackendUrl = () => {
-  if (isWeb) {
-    return 'http://localhost:8000/api';
-  }
-
-  const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest?.debuggerHost;
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-      return `http://${ip}:8000/api`;
-    }
-  }
-  return 'https://mygrap.onrender.com/api';
-};
+const API_BASE_URL = 'https://mygrap.onrender.com/api';
 
 export const API_BASE_URL = getBackendUrl();
 
