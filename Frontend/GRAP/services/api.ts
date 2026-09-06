@@ -16,7 +16,7 @@ const getBackendUrl = () => {
       return `http://${ip}:8000/api`;
     }
   }
-  return 'http://10.52.192.130:8000/api';
+  return 'https://mygrap.onrender.com/api';
 };
 
 export const API_BASE_URL = getBackendUrl();
