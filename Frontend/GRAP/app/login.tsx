@@ -152,8 +152,8 @@ export default function LoginScreen() {
       <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: contentPadding }]} keyboardShouldPersistTaps="handled">
         <View style={[styles.contentInner, isDesktop && styles.contentInnerDesktop]}>
         <View style={styles.brandRow}>
-          <View style={styles.logo}><Ionicons name="navigate" size={25} color="#FFFFFF" /></View>
-          <View><Text style={styles.brand}>GRAP</Text><Text style={styles.brandTag}>Move with confidence</Text></View>
+          <Image source={require('../assets/images/logo.jpg')} style={styles.logo} />
+          <View><Text style={styles.brand}>GRAP</Text><Text style={styles.brandTag}>Ride together, go further</Text></View>
         </View>
 
         <View style={styles.hero}>
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
   contentInner: { width: '100%', maxWidth: 560, alignSelf: 'center' },
   contentInnerDesktop: { paddingTop: 28 },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 42 },
-  logo: { width: 46, height: 46, borderRadius: 15, backgroundColor: colors.green, alignItems: 'center', justifyContent: 'center' },
+  logo: { width: 46, height: 46, borderRadius: 12, overflow: 'hidden' },
   brand: { color: colors.ink, fontSize: 23, fontWeight: '900', letterSpacing: 2 },
   brandTag: { color: colors.muted, fontSize: 12, marginTop: 1 },
   hero: { marginBottom: 25 },

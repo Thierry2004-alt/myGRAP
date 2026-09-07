@@ -23,16 +23,16 @@ const greenDark = '#1E9B3D';
 const greenLight = '#5CD06E';
 
 const darkColors: ThemeColors = {
-  bg: '#111714',
-  card: '#1B241F',
-  cardBorder: '#2D3A32',
-  text: '#F1F5F0',
-  subText: '#AAB7AD',
-  primary: bluePrimary,
-  secondary: greenPrimary,
+  bg: '#0B1220',
+  card: '#111A2E',
+  cardBorder: '#1E2D4A',
+  text: '#F1F5F9',
+  subText: '#94A3B8',
+  primary: blueLight,
+  secondary: greenLight,
   accent: '#F4BB32',
-  inputBg: '#162019',
-  mapBg: '#111714',
+  inputBg: '#0F172A',
+  mapBg: '#0B1220',
 };
 
 const lightColors: ThemeColors = {
