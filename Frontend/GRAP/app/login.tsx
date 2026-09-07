@@ -20,14 +20,14 @@ import { useResponsive } from '../utils/responsive';
 type Role = 'PASSENGER' | 'DRIVER';
 
 const colors = {
-  ink: '#18323A',
+  ink: '#0D3A7A',
   muted: '#5E7472',
-  line: '#D7E6E2',
-  canvas: '#F4F8F7',
+  line: '#DCE2DA',
+  canvas: '#F6F7F4',
   card: '#FFFFFF',
-  green: '#087F8C',
-  greenDark: '#075E68',
-  blue: '#D96F61',
+  green: '#3BB55C',
+  greenDark: '#1E9B3D',
+  blue: '#1B56B6',
 };
 
 export default function LoginScreen() {
