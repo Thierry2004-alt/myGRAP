@@ -25,10 +25,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadStoredSession();
-  }, []);
-
   const loadStoredSession = async () => {
     try {
       await api.initToken();
@@ -46,6 +42,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setIsLoading(false);
+    }, 10000);
+    loadStoredSession().finally(() => clearTimeout(timeoutId));
+  }, []);
 
   const login = async (u: string, p: string) => {
     const res = await api.login(u, p);
