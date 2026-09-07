@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Alert, Modal, Share } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Alert, Modal, Share, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import GoogleDriverMap from '../../components/GoogleDriverMap';
@@ -43,6 +43,7 @@ export default function PassengerRidesScreen() {
   const [activeRide, setActiveRide] = useState<any | null>(null);
   const [completedRides, setCompletedRides] = useState<any[]>([]);
   const [sharedHistory, setSharedHistory] = useState<any[]>([]);
+  const [participants, setParticipants] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -98,6 +99,31 @@ export default function PassengerRidesScreen() {
   useEffect(() => {
     fetchLiveActiveRide();
   }, [paramRideId]);
+
+  useEffect(() => {
+    const loadParticipants = async () => {
+      if (!activeRide?.is_shared || !activeRide?.id) {
+        setParticipants([]);
+        return;
+      }
+      try {
+        const shared = await api.getMySharedRides();
+        const initiated = shared.initiated || [];
+        const match = initiated.find((item: any) => item?.shared_ride_id || item?.id === activeRide.id || item?.primary_ride_id === Number(activeRide.id));
+        if (match?.shared_ride_id) {
+          const status = await api.getSharedRideStatus(match.shared_ride_id);
+          setParticipants(status.participants || []);
+        } else {
+          setParticipants([]);
+        }
+      } catch (e) {
+        console.log('Failed to load participants:', e);
+        setParticipants([]);
+      }
+    };
+
+    loadParticipants();
+  }, [activeRide?.id, activeRide?.is_shared]);
 
   // SAVE ACTIVE RIDE TO STORAGE EVERY TIME IT UPDATES (PERSISTENT ACROSS TAB SWITCHES)
   useEffect(() => {
@@ -271,33 +297,41 @@ export default function PassengerRidesScreen() {
     );
   };
 
-  // INSTANT PERSISTENT CANCELLATION HANDLER
   const handleCancelRide = async () => {
-    Alert.alert(
-      'Cancel Ride Request?',
-      'Are you sure you want to cancel this ride request?',
-      [
-        { text: 'No, Keep Ride', style: 'cancel' },
-        {
-          text: 'Yes, Cancel Ride',
-          style: 'destructive',
-          onPress: async () => {
-            if (activeRide?.id) {
-              try {
-                await api.cancelRide(Number(activeRide.id));
-              } catch (e) {
-                console.log('Error cancelling:', e);
-              }
-            }
-            await activeRideStorage.clear();
-            setActiveRide(null);
-            setPassengerAccepted(false);
-            setNoDriverAvailable(false);
-            router.replace('/');
+    const performCancel = async () => {
+      if (activeRide?.id) {
+        try {
+          await api.cancelRide(Number(activeRide.id));
+        } catch (e) {
+          console.log('Error cancelling:', e);
+        }
+      }
+      await activeRideStorage.clear();
+      setActiveRide(null);
+      setPassengerAccepted(false);
+      setNoDriverAvailable(false);
+      router.replace('/');
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Cancel Ride Request?\n\nAre you sure you want to cancel this ride request?');
+      if (confirmed) {
+        await performCancel();
+      }
+    } else {
+      Alert.alert(
+        'Cancel Ride Request?',
+        'Are you sure you want to cancel this ride request?',
+        [
+          { text: 'No, Keep Ride', style: 'cancel' },
+          {
+            text: 'Yes, Cancel Ride',
+            style: 'destructive',
+            onPress: performCancel,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   // VERIFY CASH PIN & ACCRUE +50 LOYALTY POINTS UPON RIDE COMPLETION
@@ -431,6 +465,13 @@ export default function PassengerRidesScreen() {
           vehicleType={isMotoVehicle ? 'MOTO' : 'CAR'}
           pickupName={pickupName}
           destName={destName}
+          passengers={participants.map((p: any) => ({
+            id: p.passenger?.id || p.id,
+            name: p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`.trim(),
+            pickupName: p.pickup_name,
+            pickupLat: Number(p.pickup_lat),
+            pickupLng: Number(p.pickup_lng),
+          }))}
           onArrivePickup={handleAutomatedPickupArrival}
           onArriveDestination={handleAutomatedDestinationArrival}
         />
@@ -577,6 +618,28 @@ export default function PassengerRidesScreen() {
           </View>
         </View>
 
+        {/* Shared Ride Participants */}
+        {participants.length > 0 && (
+          <View style={[styles.participantsCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
+            <View style={styles.participantsHeader}>
+              <Ionicons name="people" size={18} color={colors.primary} />
+              <Text style={[styles.participantsTitle, { color: colors.text }]}>Joined Passengers ({participants.length})</Text>
+            </View>
+            {participants.map((p: any) => (
+              <View key={p.id} style={[styles.participantRow, { borderBottomColor: colors.cardBorder }]}>
+                <View style={[styles.participantAvatar, { backgroundColor: `${colors.primary}20` }]}>
+                  <Text style={[styles.participantInitial, { color: colors.primary }]}>{((p.passenger?.username || p.passenger_name || 'P') || 'P').charAt(0).toUpperCase()}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.participantName, { color: colors.text }]}>{p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`}</Text>
+                  <Text style={[styles.participantPickup, { color: colors.subText }]}>{p.pickup_name}</Text>
+                </View>
+                <Text style={[styles.participantFare, { color: colors.primary }]}>{Number(p.allocated_shared_fare || 0).toLocaleString()} FCFA</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* PAYMENT METHOD CONDITIONAL: CASH 4-DIGIT PIN vs DIGITAL MOBILE MONEY BADGE */}
         {selectedPayment === 'CASH' ? (
           <View style={[styles.otpCard, { backgroundColor: colors.inputBg, borderColor: colors.accent }]}>
@@ -630,7 +693,11 @@ export default function PassengerRidesScreen() {
         )}
 
         {/* WELL-DESIGNED CANCEL RIDE BUTTON */}
-        <TouchableOpacity style={styles.cancelRideBtn} onPress={handleCancelRide}>
+        <TouchableOpacity
+          style={[styles.cancelRideBtn, Platform.OS === 'web' && { cursor: 'pointer' }]}
+          onPress={handleCancelRide}
+          onClick={(e) => { if (Platform.OS === 'web') { e.preventDefault(); handleCancelRide(); } }}
+        >
           <Ionicons name="close-circle" size={18} color="#FF5252" style={{ marginRight: 6 }} />
           <Text style={styles.cancelRideBtnText}>Cancel Ride Request</Text>
         </TouchableOpacity>
@@ -1208,6 +1275,52 @@ const styles = StyleSheet.create({
   },
   digitalConfirmBtnText: {
     color: '#0B1325',
+    fontWeight: '800',
+  },
+  participantsCard: {
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  participantsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  participantsTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  participantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  participantAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  participantInitial: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  participantName: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  participantPickup: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  participantFare: {
+    fontSize: 12,
     fontWeight: '800',
   },
 });
