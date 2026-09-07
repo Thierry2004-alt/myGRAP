@@ -35,9 +35,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const storedToken = await safeStorage.getItem('grap_access_token');
       if (storedToken) {
         setToken(storedToken);
-        const me = await api.getMe();
-        setUser(me.user);
-        setRole(me.user.role);
+        const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Session check timed out')), 8000));
+        const me = await Promise.race([api.getMe(), timeoutPromise]);
+        setUser((me as any).user);
+        setRole((me as any).user.role);
       }
     } catch (e) {
       console.log('No active session or token expired');
