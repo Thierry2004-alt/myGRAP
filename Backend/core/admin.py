@@ -8,6 +8,7 @@ from .models import (
     DriverVehicleAssignment,
     RideCategory,
     Ride,
+    Payment,
     SharedRide,
     SharedRideParticipant,
     DriverEarning,
@@ -76,6 +77,15 @@ class RideAdmin(admin.ModelAdmin):
     search_fields = ('pickup_name', 'destination_name', 'passenger__username', 'driver__username', 'cash_otp')
     readonly_fields = ('created_at', 'completed_at')
     list_select_related = ('passenger', 'driver', 'category')
+
+
+@admin.register(Payment)
+class PaymentAdmin(admin.ModelAdmin):
+    list_display = ('id', 'ride', 'amount', 'method', 'status', 'transaction_ref', 'paid_at', 'created_at')
+    list_filter = ('method', 'status', 'created_at')
+    search_fields = ('ride__id', 'transaction_ref', 'ride__passenger__username')
+    readonly_fields = ('created_at',)
+    list_select_related = ('ride', 'ride__passenger')
 
 
 @admin.register(SharedRide)

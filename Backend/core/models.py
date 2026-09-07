@@ -162,6 +162,31 @@ class Ride(models.Model):
         return f"Ride #{self.id}: {self.passenger.username} ({self.status})"
 
 
+class Payment(models.Model):
+    class Method(models.TextChoices):
+        CASH = 'CASH', 'Cash'
+        MOBILE_MONEY = 'MOBILE_MONEY', 'Mobile Money'
+        CARD = 'CARD', 'Card'
+        WALLET = 'WALLET', 'Wallet'
+
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        SUCCESSFUL = 'SUCCESSFUL', 'Successful'
+        FAILED = 'FAILED', 'Failed'
+        REFUNDED = 'REFUNDED', 'Refunded'
+
+    ride = models.OneToOneField(Ride, on_delete=models.CASCADE, related_name='payment')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    method = models.CharField(max_length=20, choices=Method.choices, default=Method.CASH)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    transaction_ref = models.CharField(max_length=100, blank=True, default='')
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Payment {self.amount} FCFA for Ride #{self.ride.id} [{self.status}]"
+
+
 class SharedRide(models.Model):
     class SharedStatus(models.TextChoices):
         SEARCHING = 'SEARCHING', 'Searching'

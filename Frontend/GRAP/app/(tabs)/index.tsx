@@ -153,7 +153,8 @@ export default function PassengerHomeScreen() {
       }
 
       const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+        accuracy: Location.Accuracy.BestForNavigation,
+        timeout: 10000,
       });
       await applyPosition(position.coords.latitude, position.coords.longitude);
     } catch (error) {

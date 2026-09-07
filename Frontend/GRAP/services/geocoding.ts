@@ -200,7 +200,7 @@ export async function searchPlaces(query: string): Promise<PlaceSuggestion[]> {
 }
 
 export async function reverseGeocode(latitude: number, longitude: number): Promise<PlaceSuggestion> {
-  const fallbackName = `Pinned location (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`;
+  const fallbackName = `GPS Position (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`;
   try {
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
@@ -208,14 +208,43 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
     );
     const data = await response.json();
     const address = data.address || {};
-    const name = data.name || address.road || address.suburb || fallbackName;
+
+    const inYaounde = latitude >= 3.65 && latitude <= 4.05 && longitude >= 11.35 && longitude <= 11.7;
+    if (!inYaounde) {
+      return {
+        id: `reverse-${latitude}-${longitude}`,
+        name: 'Yaoundé, Cameroon',
+        zone: 'Yaoundé',
+        latitude: Number(latitude.toFixed(6)),
+        longitude: Number(longitude.toFixed(6)),
+        address: 'Yaoundé, Cameroon',
+      };
+    }
+
+    const roadLower = String(address.road || '').toLowerCase();
+    const isMbalmayoRoad = roadLower.includes('mbalmayo') || roadLower.includes('mbal');
+
+    const name =
+      data.name ||
+      (isMbalmayoRoad ? '' : address.road) ||
+      address.suburb ||
+      address.city_district ||
+      address.city ||
+      'Yaoundé';
+
+    const zone = address.suburb || address.city_district || address.city || 'Yaoundé';
+    const displayAddress =
+      data.display_name && !isMbalmayoRoad
+        ? data.display_name
+        : `${name}, ${zone}, Yaoundé, Cameroon`;
+
     return {
       id: `reverse-${latitude}-${longitude}`,
       name,
-      zone: address.suburb || address.city_district || address.city || 'Yaoundé',
+      zone,
       latitude: Number(latitude.toFixed(6)),
       longitude: Number(longitude.toFixed(6)),
-      address: data.display_name || fallbackName,
+      address: displayAddress,
     };
   } catch (error) {
     console.log('Reverse geocoding error:', error);
