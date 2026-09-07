@@ -46,6 +46,7 @@ export default function PassengerRidesScreen() {
   const [participants, setParticipants] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [driverPosition, setDriverPosition] = useState<{ lat: number; lng: number } | null>(null);
 
   // EXPLICIT PASSENGER ACCEPTANCE & TRIP STAGE STATE
   const [passengerAccepted, setPassengerAccepted] = useState(false);
@@ -101,15 +102,26 @@ export default function PassengerRidesScreen() {
   }, [paramRideId]);
 
   useEffect(() => {
+    if (activeRide?.pickup_lat && activeRide?.pickup_lng) {
+      setDriverPosition({ lat: activeRide.pickup_lat + 0.005, lng: activeRide.pickup_lng + 0.005 });
+    }
+  }, [activeRide?.pickup_lat, activeRide?.pickup_lng]);
+
+  useEffect(() => {
     const loadParticipants = async () => {
-      if (!activeRide?.is_shared || !activeRide?.id) {
+      if (!activeRide?.id) {
         setParticipants([]);
         return;
       }
       try {
-        const shared = await api.getMySharedRides();
+        const shared = await api.getMySharedRides().catch(() => ({ joined: [], initiated: [] }));
         const initiated = shared.initiated || [];
-        const match = initiated.find((item: any) => item?.shared_ride_id || item?.id === activeRide.id || item?.primary_ride_id === Number(activeRide.id));
+        const rideId = Number(activeRide.id);
+        const match = initiated.find((item: any) => {
+          const itemId = Number(item?.shared_ride_id || item?.id || 0);
+          const primaryId = Number(item?.primary_ride_id || 0);
+          return itemId === rideId || primaryId === rideId;
+        });
         if (match?.shared_ride_id) {
           const status = await api.getSharedRideStatus(match.shared_ride_id);
           setParticipants(status.participants || []);
@@ -123,7 +135,9 @@ export default function PassengerRidesScreen() {
     };
 
     loadParticipants();
-  }, [activeRide?.id, activeRide?.is_shared]);
+    const interval = setInterval(loadParticipants, 5000);
+    return () => clearInterval(interval);
+  }, [activeRide?.id]);
 
   // SAVE ACTIVE RIDE TO STORAGE EVERY TIME IT UPDATES (PERSISTENT ACROSS TAB SWITCHES)
   useEffect(() => {
@@ -134,6 +148,20 @@ export default function PassengerRidesScreen() {
       });
     }
   }, [activeRide, passengerAccepted]);
+
+  useEffect(() => {
+    const restoreAccepted = async () => {
+      try {
+        const stored = await activeRideStorage.get();
+        if (stored?.passengerAccepted) {
+          setPassengerAccepted(true);
+        }
+      } catch (e) {
+        console.log('Failed to restore passengerAccepted:', e);
+      }
+    };
+    restoreAccepted();
+  }, []);
 
   const fetchLiveActiveRide = async () => {
     setLoading(true);
@@ -459,8 +487,8 @@ export default function PassengerRidesScreen() {
           pickupLng={activeRide.pickup_lng || paramPickupLng}
           destLat={activeRide.destination_lat || paramDestLat}
           destLng={activeRide.destination_lng || paramDestLng}
-          driverLat={3.8450}
-          driverLng={11.5050}
+          driverLat={driverPosition?.lat ?? 3.8450}
+          driverLng={driverPosition?.lng ?? 11.5050}
           isMoving={passengerAccepted}
           vehicleType={isMotoVehicle ? 'MOTO' : 'CAR'}
           pickupName={pickupName}
@@ -619,24 +647,28 @@ export default function PassengerRidesScreen() {
         </View>
 
         {/* Shared Ride Participants */}
-        {participants.length > 0 && (
+        {activeRide?.is_shared && (
           <View style={[styles.participantsCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
             <View style={styles.participantsHeader}>
               <Ionicons name="people" size={18} color={colors.primary} />
               <Text style={[styles.participantsTitle, { color: colors.text }]}>Joined Passengers ({participants.length})</Text>
             </View>
-            {participants.map((p: any) => (
-              <View key={p.id} style={[styles.participantRow, { borderBottomColor: colors.cardBorder }]}>
-                <View style={[styles.participantAvatar, { backgroundColor: `${colors.primary}20` }]}>
-                  <Text style={[styles.participantInitial, { color: colors.primary }]}>{((p.passenger?.username || p.passenger_name || 'P') || 'P').charAt(0).toUpperCase()}</Text>
+            {participants.length === 0 ? (
+              <Text style={[styles.participantEmpty, { color: colors.subText }]}>No passengers have joined yet.</Text>
+            ) : (
+              participants.map((p: any) => (
+                <View key={p.id} style={[styles.participantRow, { borderBottomColor: colors.cardBorder }]}>
+                  <View style={[styles.participantAvatar, { backgroundColor: `${colors.primary}20` }]}>
+                    <Text style={[styles.participantInitial, { color: colors.primary }]}>{((p.passenger?.username || p.passenger_name || 'P') || 'P').charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.participantName, { color: colors.text }]}>{p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`}</Text>
+                    <Text style={[styles.participantPickup, { color: colors.subText }]}>{p.pickup_name}</Text>
+                  </View>
+                  <Text style={[styles.participantFare, { color: colors.primary }]}>{Number(p.allocated_shared_fare || 0).toLocaleString()} FCFA</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.participantName, { color: colors.text }]}>{p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`}</Text>
-                  <Text style={[styles.participantPickup, { color: colors.subText }]}>{p.pickup_name}</Text>
-                </View>
-                <Text style={[styles.participantFare, { color: colors.primary }]}>{Number(p.allocated_shared_fare || 0).toLocaleString()} FCFA</Text>
-              </View>
-            ))}
+              ))
+            )}
           </View>
         )}
 
@@ -1322,5 +1354,10 @@ const styles = StyleSheet.create({
   participantFare: {
     fontSize: 12,
     fontWeight: '800',
+  },
+  participantEmpty: {
+    fontSize: 13,
+    fontWeight: '600',
+    paddingVertical: 6,
   },
 });
