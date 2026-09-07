@@ -778,9 +778,13 @@ export default function PassengerHomeScreen() {
                       </View>
                     </View>
 
-                    <TouchableOpacity style={[styles.joinBtn, { backgroundColor: colors.primary, paddingVertical: verticalScale(9), borderRadius: moderateScale(10), marginTop: verticalScale(6), alignItems: 'center', justifyContent: 'center', flexDirection: 'row' }]} onPress={() => handleJoinSharedMatch(m)}>
+                    <TouchableOpacity
+                      style={[styles.joinBtn, { backgroundColor: colors.primary, paddingVertical: verticalScale(9), borderRadius: moderateScale(10), marginTop: verticalScale(6), alignItems: 'center', justifyContent: 'center', flexDirection: 'row', opacity: (m.available_seats || 0) <= 0 ? 0.6 : 1 }]}
+                      onPress={() => handleJoinSharedMatch(m)}
+                      disabled={requesting || (m.available_seats || 0) <= 0}
+                    >
                       <Ionicons name="car-outline" size={moderateScale(16)} color="#0B1325" style={{ marginRight: horizontalScale(6) }} />
-                      <Text style={[styles.joinBtnText, { color: '#0B1325', fontSize: fontScale(12), fontWeight: '800' }]}>{t('joinShared')} ({m.proportional_shared_fare} FCFA)</Text>
+                      <Text style={[styles.joinBtnText, { color: '#0B1325', fontSize: fontScale(12), fontWeight: '800' }]}>{(m.available_seats || 0) <= 0 ? 'Ride Full' : `${t('joinShared')} (${m.proportional_shared_fare} FCFA)`}</Text>
                     </TouchableOpacity>
                   </View>
                 ))

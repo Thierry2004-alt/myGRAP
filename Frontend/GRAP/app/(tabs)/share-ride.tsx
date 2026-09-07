@@ -209,12 +209,14 @@ export default function VoluntaryShareRideScreen() {
                 <TouchableOpacity
                   style={styles.joinBtn}
                   onPress={() => handleJoinSharedRide(item)}
-                  disabled={joiningId === item.shared_ride_id}
+                  disabled={joiningId === item.shared_ride_id || (item.available_seats || 0) <= 0}
                 >
                   {joiningId === item.shared_ride_id ? (
                     <ActivityIndicator color="#0B1325" />
                   ) : (
-                    <Text style={styles.joinBtnText}>Join This Shared Ride</Text>
+                    <Text style={styles.joinBtnText}>
+                      {(item.available_seats || 0) <= 0 ? 'Ride Full' : 'Join This Shared Ride'}
+                    </Text>
                   )}
                 </TouchableOpacity>
               </View>
