@@ -6,18 +6,10 @@ import { ThemeProvider, useTheme } from '../context/ThemeContext';
 import { LanguageProvider } from '../context/LanguageContext';
 import LoginScreen from './login';
 import { View, ActivityIndicator } from 'react-native';
-import { ObserveRoot, useObserve } from 'expo-observe';
 
 function RootLayoutNav() {
   const { token, isLoading } = useAuth();
   const { mode, colors } = useTheme();
-  const { markInteractive } = useObserve();
-
-  React.useEffect(() => {
-    if (!isLoading) {
-      markInteractive();
-    }
-  }, [isLoading, markInteractive]);
 
   if (isLoading) {
     return (
@@ -41,7 +33,7 @@ function RootLayoutNav() {
   );
 }
 
-function RootLayout() {
+export default function RootLayout() {
   return (
     <ThemeProvider>
       <LanguageProvider>
@@ -52,5 +44,3 @@ function RootLayout() {
     </ThemeProvider>
   );
 }
-
-export default ObserveRoot.wrap(RootLayout);
