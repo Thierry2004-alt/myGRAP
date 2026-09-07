@@ -283,44 +283,26 @@ export default function PassengerHomeScreen() {
 
       if (rideMode === 'SHARED') {
         await api.makeRideShareable(rideId);
-        Alert.alert(
-          'Shareable Ride Requested!',
-          `Ride #${rideId} requested. Payment: ${paymentMethod}.\nMatching driver...`,
-          [
-            {
-              text: 'Track Ride',
-              onPress: () =>
-                router.push({
-                  pathname: '/rides',
-                  params: {
-                    ride_id: String(rideId),
-                    pay: paymentMethod,
-                    pickup: pickupName,
-                    dest: destName,
-                    fare: String(estimatedFare || 1300),
-                  },
-                }),
-            },
-          ]
-        );
+      }
+
+      const params = {
+        ride_id: String(rideId),
+        pay: paymentMethod,
+        pickup: pickupName,
+        dest: destName,
+        fare: String(estimatedFare || 1300),
+      };
+
+      if (Platform.OS === 'web') {
+        router.push({ pathname: '/rides', params });
       } else {
         Alert.alert(
-          'Private Ride Requested!',
+          rideMode === 'SHARED' ? 'Shareable Ride Requested!' : 'Private Ride Requested!',
           `Ride #${rideId} requested. Payment: ${paymentMethod}.\nMatching driver...`,
           [
             {
               text: 'Track Ride',
-              onPress: () =>
-                router.push({
-                  pathname: '/rides',
-                  params: {
-                    ride_id: String(rideId),
-                    pay: paymentMethod,
-                    pickup: pickupName,
-                    dest: destName,
-                    fare: String(estimatedFare || 1300),
-                  },
-                }),
+              onPress: () => router.push({ pathname: '/rides', params }),
             },
           ]
         );
@@ -347,31 +329,32 @@ export default function PassengerHomeScreen() {
       });
 
       const rideId = match.primary_ride_id || Math.floor(Math.random() * 1000) + 1;
+      const params = {
+        ride_id: String(rideId),
+        pay: paymentMethod,
+        pickup: pickupName,
+        dest: destName,
+        fare: String(match.proportional_shared_fare || 800),
+        pickup_lat: String(pickupLat),
+        pickup_lng: String(pickupLng),
+        dest_lat: String(destLat),
+        dest_lng: String(destLng),
+      };
 
-      Alert.alert(
-        'Joined Shared Ride!',
-        `Joined ride #${rideId}.\nFare: ${res.allocated_fare} FCFA via ${paymentMethod}`,
-        [
-          {
-            text: 'Track Ride',
-            onPress: () =>
-              router.push({
-                pathname: '/rides',
-                params: {
-                  ride_id: String(rideId),
-                  pay: paymentMethod,
-                  pickup: pickupName,
-                  dest: destName,
-                  fare: String(match.proportional_shared_fare || 800),
-                  pickup_lat: String(pickupLat),
-                  pickup_lng: String(pickupLng),
-                  dest_lat: String(destLat),
-                  dest_lng: String(destLng),
-                },
-              }),
-          },
-        ]
-      );
+      if (Platform.OS === 'web') {
+        router.push({ pathname: '/rides', params });
+      } else {
+        Alert.alert(
+          'Joined Shared Ride!',
+          `Joined ride #${rideId}.\nFare: ${res.allocated_fare} FCFA via ${paymentMethod}`,
+          [
+            {
+              text: 'Track Ride',
+              onPress: () => router.push({ pathname: '/rides', params }),
+            },
+          ]
+        );
+      }
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to join shared ride');
     } finally {
