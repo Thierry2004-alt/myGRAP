@@ -4,7 +4,7 @@
     "slug": "GRAP",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/logo.jpg",
     "scheme": "grap",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -18,8 +18,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/logo.jpg",
+        "backgroundColor": "#1B56B6"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
