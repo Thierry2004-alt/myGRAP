@@ -207,9 +207,13 @@ export default function VoluntaryShareRideScreen() {
                 </View>
 
                 <TouchableOpacity
-                  style={styles.joinBtn}
+                  style={[
+                    styles.joinBtn,
+                    (item.available_seats || 0) <= 0 && styles.joinBtnDisabled,
+                  ]}
                   onPress={() => handleJoinSharedRide(item)}
                   disabled={joiningId === item.shared_ride_id || (item.available_seats || 0) <= 0}
+                  pointerEvents={(joiningId === item.shared_ride_id || (item.available_seats || 0) <= 0) ? 'none' : 'auto'}
                 >
                   {joiningId === item.shared_ride_id ? (
                     <ActivityIndicator color="#0B1325" />
@@ -413,6 +417,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  joinBtnDisabled: {
+    backgroundColor: '#37474F',
   },
   joinBtnText: {
     color: '#0B1325',
