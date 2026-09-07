@@ -113,18 +113,11 @@ export default function PassengerHomeScreen() {
       }
       navigator.geolocation.getCurrentPosition(
         resolve,
-        () => {
-          // Second attempt: low accuracy (WiFi / IP network geolocation)
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: false,
-            timeout: 5000,
-            maximumAge: 60000,
-          });
-        },
+        reject,
         {
           enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 30000,
+          timeout: 10000,
+          maximumAge: 0,
         }
       );
     });
