@@ -18,21 +18,23 @@ export interface ThemeColors {
 const bluePrimary = '#1B56B6';
 const blueDark = '#0D3A7A';
 const blueLight = '#2A8FD6';
+const blueSky = '#E3F2FD';
 const greenPrimary = '#3BB55C';
 const greenDark = '#1E9B3D';
 const greenLight = '#5CD06E';
+const greenMint = '#E8F5E9';
 
 const darkColors: ThemeColors = {
-  bg: '#0B1220',
-  card: '#111A2E',
-  cardBorder: '#1E2D4A',
-  text: '#F1F5F9',
-  subText: '#94A3B8',
+  bg: '#0F172A',
+  card: '#1E293B',
+  cardBorder: '#334155',
+  text: '#F8FAFC',
+  subText: '#CBD5E1',
   primary: blueLight,
   secondary: greenLight,
-  accent: '#F4BB32',
-  inputBg: '#0F172A',
-  mapBg: '#0B1220',
+  accent: '#FBBF24',
+  inputBg: '#1E293B',
+  mapBg: '#0F172A',
 };
 
 const lightColors: ThemeColors = {

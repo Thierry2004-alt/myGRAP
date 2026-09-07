@@ -152,7 +152,7 @@ export default function LoginScreen() {
       <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: contentPadding }]} keyboardShouldPersistTaps="handled">
         <View style={[styles.contentInner, isDesktop && styles.contentInnerDesktop]}>
         <View style={styles.brandRow}>
-          <Image source={require('../assets/images/logo.jpg')} style={styles.logo} />
+          <Image source={require('../assets/images/logo.png')} style={styles.logo} />
           <View><Text style={styles.brand}>GRAP</Text><Text style={styles.brandTag}>Ride together, go further</Text></View>
         </View>
 

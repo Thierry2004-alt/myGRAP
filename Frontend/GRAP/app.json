@@ -4,12 +4,12 @@
     "slug": "GRAP",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/logo.jpg",
+    "icon": "./assets/images/logo.png",
     "scheme": "grap",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/logo.jpg",
+      "image": "./assets/images/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#1B56B6"
     },
@@ -17,8 +17,9 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.thierrynti.grap",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo.jpg",
+        "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#1B56B6"
       },
       "edgeToEdgeEnabled": true,
@@ -34,6 +35,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "268dc9c3-c4c3-4493-b080-9c32ac7b34eb"
+      }
+    },
+    "owner": "thierry_nti"
   }
 }
