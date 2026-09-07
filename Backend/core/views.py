@@ -255,7 +255,7 @@ class GroqPlaceRecommendationView(APIView):
                     'contents': [{'parts': [{'text': prompt_text}]}],
                     'generationConfig': {
                         'temperature': 0.3,
-                        'maxOutputTokens': 380,
+                        'maxOutputTokens': 1024,
                     }
                 }).encode('utf-8')
                 gemini_req = UrlRequest(
