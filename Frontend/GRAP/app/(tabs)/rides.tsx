@@ -9,6 +9,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { useResponsive, responsiveContainerStyle } from '../../utils/responsive';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 interface AlternativeDriverProposal {
   id: string;
@@ -147,6 +148,21 @@ export default function PassengerRidesScreen() {
     const interval = setInterval(loadParticipants, 5000);
     return () => clearInterval(interval);
   }, [activeRide?.id]);
+
+  useWebSocket({
+    url: activeRide?.id ? `ws://${window.location.host}/ws/rides/${activeRide.id}/` : '',
+    onMessage: (data) => {
+      if (data.type === 'participant_joined') {
+        setParticipants((prev) => [...prev, data.data]);
+      } else if (data.type === 'ride_cancelled') {
+        Alert.alert('Ride Cancelled', 'This ride has been cancelled.');
+        setActiveRide(null);
+        setPassengerAccepted(false);
+        router.replace('/');
+      }
+    },
+    reconnectInterval: 2000,
+  });
 
   // SAVE ACTIVE RIDE TO STORAGE EVERY TIME IT UPDATES (PERSISTENT ACROSS TAB SWITCHES)
   useEffect(() => {
