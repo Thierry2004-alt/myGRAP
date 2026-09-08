@@ -41,7 +41,7 @@ export function useWebSocket({ rideId, onMessage, reconnectInterval = 3000 }: Us
           const data = JSON.parse(event.data);
           onMessage?.(data);
         } catch (e) {
-          console.error('WebSocket message parse error:', e);
+          // ignore parse errors
         }
       };
 
@@ -50,13 +50,11 @@ export function useWebSocket({ rideId, onMessage, reconnectInterval = 3000 }: Us
         reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
       };
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      ws.onerror = () => {
         ws.close();
       };
     } catch (e) {
-      console.error('WebSocket connection error:', e);
-      reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
+      // fail silently
     }
   };
 

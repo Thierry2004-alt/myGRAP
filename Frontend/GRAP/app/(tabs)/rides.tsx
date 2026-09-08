@@ -119,11 +119,13 @@ export default function PassengerRidesScreen() {
         const shared = await api.getMySharedRides().catch(() => ({ joined: [], initiated: [] }));
         const initiated = shared.initiated || [];
         const rideId = Number(activeRide.id);
-        console.log('Loading participants for rideId:', rideId, 'initiated count:', initiated.length);
+        console.log('Loading participants for rideId:', rideId, 'initiated count:', initiated.length, 'initiated sample:', JSON.stringify(initiated[0]).slice(0, 200));
         const match = initiated.find((item: any) => {
           const itemSharedId = Number(item?.shared_ride_id || 0);
-          const primaryRideId = Number(item?.primary_ride?.id || 0);
-          return itemSharedId === rideId || primaryRideId === rideId;
+          const primaryRideId = Number(item?.primary_ride?.id || item?.primary_ride_id || 0);
+          const rideIdField = Number(item?.ride_id || 0);
+          console.log('Checking item:', itemSharedId, primaryRideId, rideIdField, 'vs', rideId);
+          return itemSharedId === rideId || primaryRideId === rideId || rideIdField === rideId;
         });
         console.log('Shared ride match:', match);
         if (match?.shared_ride_id) {
@@ -135,7 +137,7 @@ export default function PassengerRidesScreen() {
             console.log('Shared ride exists but no participants yet');
           }
         } else {
-          console.log('No shared ride match found for rideId:', rideId);
+          console.log('No shared ride match found for rideId:', rideId, 'available ids:', initiated.map((i: any) => ({ shared_ride_id: i?.shared_ride_id, primary_ride_id: i?.primary_ride?.id, ride_id: i?.ride_id })));
           setParticipants([]);
         }
       } catch (e) {
