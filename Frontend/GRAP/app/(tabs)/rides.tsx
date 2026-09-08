@@ -47,6 +47,7 @@ export default function PassengerRidesScreen() {
   const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [driverPosition, setDriverPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
 
   // EXPLICIT PASSENGER ACCEPTANCE & TRIP STAGE STATE
   const [passengerAccepted, setPassengerAccepted] = useState(false);
@@ -117,15 +118,23 @@ export default function PassengerRidesScreen() {
         const shared = await api.getMySharedRides().catch(() => ({ joined: [], initiated: [] }));
         const initiated = shared.initiated || [];
         const rideId = Number(activeRide.id);
+        console.log('Loading participants for rideId:', rideId, 'initiated count:', initiated.length);
         const match = initiated.find((item: any) => {
-          const itemId = Number(item?.shared_ride_id || item?.id || 0);
-          const primaryId = Number(item?.primary_ride_id || 0);
-          return itemId === rideId || primaryId === rideId;
+          const itemSharedId = Number(item?.shared_ride_id || 0);
+          const primaryRideId = Number(item?.primary_ride?.id || 0);
+          return itemSharedId === rideId || primaryRideId === rideId;
         });
+        console.log('Shared ride match:', match);
         if (match?.shared_ride_id) {
           const status = await api.getSharedRideStatus(match.shared_ride_id);
-          setParticipants(status.participants || []);
+          console.log('Shared ride status participants:', status?.participants);
+          const list = status?.participants || [];
+          setParticipants(list);
+          if (list.length === 0 && status?.shared_ride_id) {
+            console.log('Shared ride exists but no participants yet');
+          }
         } else {
+          console.log('No shared ride match found for rideId:', rideId);
           setParticipants([]);
         }
       } catch (e) {
@@ -158,6 +167,8 @@ export default function PassengerRidesScreen() {
         }
       } catch (e) {
         console.log('Failed to restore passengerAccepted:', e);
+      } finally {
+        setStorageReady(true);
       }
     };
     restoreAccepted();
@@ -551,6 +562,11 @@ export default function PassengerRidesScreen() {
               </View>
             ))}
           </View>
+        ) : !storageReady ? (
+          <View style={{ paddingVertical: verticalScale(20), alignItems: 'center' }}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={[styles.loadingText, { color: colors.subText, marginTop: verticalScale(12), fontSize: fontScale(14) }]}>Restoring ride state...</Text>
+          </View>
         ) : !passengerAccepted ? (
           /* CASE B: INITIAL DRIVER MATCH PROPOSAL (PASSENGER CAN ACCEPT OR DECLINE) */
           <View style={[styles.proposalCard, { backgroundColor: colors.inputBg, borderColor: colors.primary }]}>
@@ -647,14 +663,17 @@ export default function PassengerRidesScreen() {
         </View>
 
         {/* Shared Ride Participants */}
-        {activeRide?.is_shared && (
+        {(activeRide?.is_shared || participants.length > 0) && (
           <View style={[styles.participantsCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
             <View style={styles.participantsHeader}>
               <Ionicons name="people" size={18} color={colors.primary} />
               <Text style={[styles.participantsTitle, { color: colors.text }]}>Joined Passengers ({participants.length})</Text>
             </View>
             {participants.length === 0 ? (
-              <Text style={[styles.participantEmpty, { color: colors.subText }]}>No passengers have joined yet.</Text>
+              <View style={{ paddingVertical: 10 }}>
+                <Text style={[styles.participantEmpty, { color: colors.subText }]}>No passengers have joined yet.</Text>
+                <Text style={[styles.participantEmpty, { color: colors.subText, fontSize: 11 }]}>Debug: rideId={activeRide?.id} is_shared={String(activeRide?.is_shared)} sharedHistory={sharedHistory.length}</Text>
+              </View>
             ) : (
               participants.map((p: any) => (
                 <View key={p.id} style={[styles.participantRow, { borderBottomColor: colors.cardBorder }]}>
@@ -668,9 +687,9 @@ export default function PassengerRidesScreen() {
                   <Text style={[styles.participantFare, { color: colors.primary }]}>{Number(p.allocated_shared_fare || 0).toLocaleString()} FCFA</Text>
                 </View>
               ))
-            )}
-          </View>
-        )}
+             )}
+           </View>
+         )}
 
         {/* PAYMENT METHOD CONDITIONAL: CASH 4-DIGIT PIN vs DIGITAL MOBILE MONEY BADGE */}
         {selectedPayment === 'CASH' ? (
@@ -776,8 +795,15 @@ export default function PassengerRidesScreen() {
               <View style={[styles.receiptDivider, { backgroundColor: colors.cardBorder }]} />
 
               <View style={styles.receiptRow}>
-                <Text style={[styles.receiptTotalLabel, { color: colors.text }]}>Total Amount Due</Text>
-                <Text style={[styles.receiptTotalAmount, { color: colors.primary }]}>1,300 FCFA</Text>
+                <Text style={[styles.receiptTotalLabel, { color: colors.text }]}>
+                  {(activeRide?.is_shared || participants.length > 0) && participants.length > 0 ? 'Total Shared Ride Fare' : 'Total Amount Due'}
+                </Text>
+                <Text style={[styles.receiptTotalAmount, { color: colors.primary }]}>
+                  {(activeRide?.is_shared || participants.length > 0) && participants.length > 0
+                    ? participants.reduce((sum, p) => sum + Number(p.allocated_shared_fare || 0), 0).toLocaleString()
+                    : '1,300'}
+                  {' '}FCFA
+                </Text>
               </View>
             </View>
 
