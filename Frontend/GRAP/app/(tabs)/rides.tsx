@@ -150,7 +150,7 @@ export default function PassengerRidesScreen() {
   }, [activeRide?.id]);
 
   useWebSocket({
-    url: activeRide?.id ? `ws://${window.location.host}/ws/rides/${activeRide.id}/` : '',
+    rideId: activeRide?.id,
     onMessage: (data) => {
       if (data.type === 'participant_joined') {
         setParticipants((prev) => [...prev, data.data]);

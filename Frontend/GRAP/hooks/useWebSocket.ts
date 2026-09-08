@@ -1,17 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
+import { API_BASE_URL } from '../services/api';
 
 interface UseWebSocketOptions {
-  url: string;
+  rideId?: string | number;
   onMessage?: (data: any) => void;
   reconnectInterval?: number;
 }
 
-export function useWebSocket({ url, onMessage, reconnectInterval = 3000 }: UseWebSocketOptions) {
+export function useWebSocket({ rideId, onMessage, reconnectInterval = 3000 }: UseWebSocketOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const buildUrl = () => {
+    if (!rideId) return '';
+    const apiUrl = API_BASE_URL.replace(/\/$/, '');
+    const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws';
+    const host = apiUrl.replace(/^https?:\/\//, '').replace(/\/api.*$/, '');
+    return `${wsProtocol}://${host}/ws/rides/${rideId}/`;
+  };
+
   const connect = () => {
+    const url = buildUrl();
+    if (!url) return;
+
     try {
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -63,7 +76,7 @@ export function useWebSocket({ url, onMessage, reconnectInterval = 3000 }: UseWe
   useEffect(() => {
     connect();
     return () => disconnect();
-  }, [url]);
+  }, [rideId]);
 
   return { isConnected, send, disconnect };
 }
