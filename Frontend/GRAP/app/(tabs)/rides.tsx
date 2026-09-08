@@ -52,6 +52,7 @@ export default function PassengerRidesScreen() {
 
   // EXPLICIT PASSENGER ACCEPTANCE & TRIP STAGE STATE
   const [passengerAccepted, setPassengerAccepted] = useState(false);
+  const [acceptedRideId, setAcceptedRideId] = useState<string | null>(null);
   const [noDriverAvailable, setNoDriverAvailable] = useState(false);
   const [showPaymentPrompt, setShowPaymentPrompt] = useState(false);
 
@@ -110,6 +111,14 @@ export default function PassengerRidesScreen() {
   }, [activeRide?.pickup_lat, activeRide?.pickup_lng]);
 
   useEffect(() => {
+    if (activeRide && params.shared === '1' && !passengerAccepted) {
+      setPassengerAccepted(true);
+      setAcceptedRideId(String(activeRide.id));
+      activeRideStorage.save({ ...activeRide, passengerAccepted: true });
+    }
+  }, [activeRide?.id, passengerAccepted, params.shared]);
+
+  useEffect(() => {
     const loadParticipants = async () => {
       if (!activeRide?.id) {
         setParticipants([]);
@@ -124,7 +133,8 @@ export default function PassengerRidesScreen() {
           const itemSharedId = Number(item?.shared_ride_id || 0);
           const primaryRideId = Number(item?.primary_ride?.id || item?.primary_ride_id || 0);
           const rideIdField = Number(item?.ride_id || 0);
-          console.log('Checking item:', itemSharedId, primaryRideId, rideIdField, 'vs', rideId);
+          const sample = initiated[0] ? JSON.stringify(initiated[0]).slice(0, 200) : 'N/A';
+          console.log('Checking item:', itemSharedId, primaryRideId, rideIdField, 'vs', rideId, 'initiated sample:', sample);
           return itemSharedId === rideId || primaryRideId === rideId || rideIdField === rideId;
         });
         console.log('Shared ride match:', match);
@@ -180,8 +190,12 @@ export default function PassengerRidesScreen() {
     const restoreAccepted = async () => {
       try {
         const stored = await activeRideStorage.get();
-        if (stored?.passengerAccepted) {
+        if (stored?.passengerAccepted && activeRide && String(stored.id) === String(activeRide.id)) {
           setPassengerAccepted(true);
+          setAcceptedRideId(String(stored.id));
+        } else if (stored?.passengerAccepted && !activeRide) {
+          setPassengerAccepted(true);
+          setAcceptedRideId(stored.id ? String(stored.id) : null);
         }
       } catch (e) {
         console.log('Failed to restore passengerAccepted:', e);
@@ -277,7 +291,9 @@ export default function PassengerRidesScreen() {
 
   // EXPLICIT PASSENGER ACTION: ACCEPT DRIVER TO START TRIP SIMULATION
   const handlePassengerAcceptDriver = () => {
+    if (!activeRide) return;
     setPassengerAccepted(true);
+    setAcceptedRideId(String(activeRide.id));
     setNoDriverAvailable(false);
     setActiveRide((prev: any) => {
       const updated = prev ? { ...prev, status: 'ACCEPTED' } : null;
@@ -585,7 +601,7 @@ export default function PassengerRidesScreen() {
             <ActivityIndicator color={colors.primary} />
             <Text style={[styles.loadingText, { color: colors.subText, marginTop: verticalScale(12), fontSize: fontScale(14) }]}>Restoring ride state...</Text>
           </View>
-        ) : !passengerAccepted ? (
+        ) : (!passengerAccepted || (acceptedRideId && activeRide && acceptedRideId !== String(activeRide.id))) ? (
           /* CASE B: INITIAL DRIVER MATCH PROPOSAL (PASSENGER CAN ACCEPT OR DECLINE) */
           <View style={[styles.proposalCard, { backgroundColor: colors.inputBg, borderColor: colors.primary }]}>
             <View style={styles.proposalHeader}>
@@ -595,7 +611,7 @@ export default function PassengerRidesScreen() {
               </Text>
             </View>
             <Text style={[styles.proposalSub, { color: colors.subText }]}>
-              Review driver profile below and tap "Accept Driver & Start Ride" or "Decline" to see other categories.
+              {params.shared === '1' ? 'You joined this shared ride. Confirm to start tracking the trip.' : 'Review driver profile below and tap "Accept Driver & Start Ride" or "Decline" to see other categories.'}
             </Text>
 
             <View style={[styles.driverCard, { backgroundColor: colors.card, marginBottom: 12 }]}>
