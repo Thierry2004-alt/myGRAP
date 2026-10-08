@@ -10,7 +10,7 @@ from core.models import (
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone_number', 'is_verified', 'is_suspended']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone_number', 'profile_picture_url', 'is_verified', 'is_suspended']
         read_only_fields = ['id', 'is_verified', 'is_suspended']
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -102,15 +102,28 @@ class RideCategorySerializer(serializers.ModelSerializer):
 
 class RideSerializer(serializers.ModelSerializer):
     passenger_name = serializers.CharField(source='passenger.get_full_name', read_only=True)
+    passenger_username = serializers.CharField(source='passenger.username', read_only=True)
+    passenger_profile_picture_url = serializers.CharField(source='passenger.profile_picture_url', read_only=True)
+    passenger_phone = serializers.CharField(source='passenger.phone_number', read_only=True)
     driver_name = serializers.CharField(source='driver.get_full_name', read_only=True)
+    driver_profile_picture_url = serializers.SerializerMethodField()
+    driver_phone_number = serializers.CharField(source='driver.phone_number', read_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True)
+    category_code = serializers.CharField(source='category.code', read_only=True)
+    category_base_fare = serializers.DecimalField(source='category.base_fare', read_only=True, max_digits=10, decimal_places=2)
+    category_rate_per_km = serializers.DecimalField(source='category.rate_per_km', read_only=True, max_digits=10, decimal_places=2)
     shared_ride_id = serializers.IntegerField(source='shared_ride_group.id', read_only=True)
+
+    def get_driver_profile_picture_url(self, obj):
+        return getattr(getattr(obj, 'driver', None), 'profile_picture_url', '') or ''
 
     class Meta:
         model = Ride
         fields = [
-            'id', 'passenger', 'driver', 'passenger_name', 'driver_name', 'shared_ride_id',
-            'category', 'category_name', 'pickup_name', 'pickup_lat', 'pickup_lng',
+            'id', 'passenger', 'driver', 'passenger_name', 'passenger_username', 'passenger_profile_picture_url', 'passenger_phone',
+            'driver_name', 'driver_profile_picture_url', 'driver_phone_number', 'shared_ride_id',
+            'category', 'category_name', 'category_code', 'category_base_fare', 'category_rate_per_km',
+            'pickup_name', 'pickup_lat', 'pickup_lng',
             'destination_name', 'destination_lat', 'destination_lng',
             'distance_km', 'estimated_fare', 'final_fare', 'status',
             'is_shareable', 'is_shared', 'cash_otp', 'payment_status',
@@ -123,11 +136,26 @@ class SharedRideParticipantSerializer(serializers.ModelSerializer):
     passenger_name = serializers.CharField(source='passenger.get_full_name', read_only=True)
     passenger_username = serializers.CharField(source='passenger.username', read_only=True)
     passenger_phone = serializers.CharField(source='passenger.phone_number', read_only=True)
+    passenger_profile_picture_url = serializers.CharField(source='passenger.profile_picture_url', read_only=True)
+    primary_ride_id = serializers.IntegerField(source='shared_ride.primary_ride.id', read_only=True)
+    initiator_name = serializers.CharField(source='shared_ride.primary_ride.passenger.get_full_name', read_only=True)
+    initiator_username = serializers.CharField(source='shared_ride.primary_ride.passenger.username', read_only=True)
+    initiator_profile_picture_url = serializers.CharField(source='shared_ride.primary_ride.passenger.profile_picture_url', read_only=True)
+    initiator_phone = serializers.CharField(source='shared_ride.primary_ride.passenger.phone_number', read_only=True)
+    driver_name = serializers.CharField(source='shared_ride.primary_ride.driver.get_full_name', read_only=True)
+    driver_username = serializers.CharField(source='shared_ride.primary_ride.driver.username', read_only=True)
+    driver_profile_picture_url = serializers.CharField(source='shared_ride.primary_ride.driver.profile_picture_url', read_only=True)
+    driver_phone_number = serializers.CharField(source='shared_ride.primary_ride.driver.phone_number', read_only=True)
+    cash_otp = serializers.CharField(source='shared_ride.primary_ride.cash_otp', read_only=True)
+    primary_status = serializers.CharField(source='shared_ride.primary_ride.status', read_only=True)
+    primary_estimated_fare = serializers.DecimalField(source='shared_ride.primary_ride.estimated_fare', max_digits=10, decimal_places=2, read_only=True)
 
     class Meta:
         model = SharedRideParticipant
         fields = [
-            'id', 'shared_ride', 'passenger', 'passenger_name', 'passenger_username', 'passenger_phone',
+            'id', 'shared_ride', 'primary_ride_id', 'passenger', 'passenger_name', 'passenger_username', 'passenger_phone', 'passenger_profile_picture_url',
+            'initiator_name', 'initiator_username', 'initiator_profile_picture_url', 'initiator_phone',
+            'driver_name', 'driver_username', 'driver_profile_picture_url', 'driver_phone_number', 'cash_otp', 'primary_status', 'primary_estimated_fare',
             'pickup_name', 'pickup_lat', 'pickup_lng', 'destination_name', 'destination_lat', 'destination_lng',
             'solo_distance_km', 'solo_calculated_fare', 'allocated_shared_fare', 'payment_status', 'joined_at'
         ]
@@ -176,3 +204,28 @@ class AIRecommendationSerializer(serializers.ModelSerializer):
     class Meta:
         model = AIRecommendation
         fields = '__all__'
+
+
+class DriverProposalSerializer(serializers.ModelSerializer):
+    driver_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    driver_profile_picture_url = serializers.CharField(source='user.profile_picture_url', read_only=True)
+    driver_phone_number = serializers.CharField(source='user.phone_number', read_only=True)
+    vehicle_info = serializers.SerializerMethodField()
+    vehicle_category = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DriverProfile
+        fields = ['id', 'driver_name', 'driver_profile_picture_url', 'driver_phone_number', 'vehicle_info', 'vehicle_category', 'rating_avg', 'total_rides']
+
+    def get_vehicle_info(self, obj):
+        assignment = obj.assignments.filter(is_active=True).select_related('vehicle').first()
+        if assignment:
+            v = assignment.vehicle
+            return f"{v.make} {v.model} • {v.license_plate}"
+        return 'Vehicle not assigned'
+
+    def get_vehicle_category(self, obj):
+        assignment = obj.assignments.filter(is_active=True).select_related('vehicle').first()
+        if assignment:
+            return assignment.vehicle.category
+        return 'ECONOMY'

@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Modal, TextInput, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
-import { activeRideStorage, loyaltyStorage, paymentStorage } from '../../services/storage';
+import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { activeRideStorage, loyaltyStorage, paymentStorage, savingsStorage } from '../../services/storage';
+import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 
 export default function PassengerProfileScreen() {
+  const router = useRouter();
   const { user, logout, refreshUser, requestEmailVerification, verifyEmail, updateProfile } = useAuth();
   const { mode, toggleTheme, colors } = useTheme();
   const { language, setLanguage, t } = useLanguage();
@@ -21,6 +24,7 @@ export default function PassengerProfileScreen() {
   const [tempAddressInput, setTempAddressInput] = useState('');
 
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
+  const [sharedSavings, setSharedSavings] = useState(0);
   const [paymentNumbers, setPaymentNumbers] = useState({ mtn: '', orange: '' });
   const [editingPayment, setEditingPayment] = useState<'MTN' | 'ORANGE' | null>(null);
   const [paymentInput, setPaymentInput] = useState('');
@@ -29,17 +33,63 @@ export default function PassengerProfileScreen() {
   const [verificationLoading, setVerificationLoading] = useState(false);
   const [profileEditorVisible, setProfileEditorVisible] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
-  const [profileForm, setProfileForm] = useState({ first_name: '', last_name: '', email: '', phone_number: '' });
+  const [profileForm, setProfileForm] = useState({ first_name: '', last_name: '', email: '', phone_number: '', profile_picture_url: '' });
+
+  const loadUserDataAndStats = async () => {
+    try {
+      const storedPoints = await loyaltyStorage.getPoints(user?.id);
+      const storedSavings = await savingsStorage.getSavings(user?.id);
+      const storedPayment = await paymentStorage.get(user?.id);
+      setPaymentNumbers(storedPayment);
+
+      const myRides = await api.getMyRides().catch(() => []);
+      const shared = await api.getMySharedRides().catch(() => ({ joined: [], initiated: [] }));
+
+      const completedSolo = Array.isArray(myRides) ? myRides.filter((r) => r.status === 'COMPLETED' || r.payment_status === 'CONFIRMED') : [];
+      const completedJoined = Array.isArray(shared.joined) ? shared.joined.filter((j: any) => j.payment_status === 'CONFIRMED' || j.primary_status === 'COMPLETED') : [];
+      const completedInitiated = Array.isArray(shared.initiated) ? shared.initiated.filter((i: any) => i.status === 'COMPLETED' || (i.participants && i.participants.length > 0)) : [];
+
+      const totalCompletedTrips = completedSolo.length + completedJoined.length;
+      const computedPoints = Math.max(storedPoints, totalCompletedTrips * 50);
+
+      let calculatedTripSavings = 0;
+      for (const j of completedJoined) {
+        const soloVal = Number(j.solo_calculated_fare) || 1400;
+        const allocVal = Number(j.allocated_shared_fare) || 750;
+        calculatedTripSavings += Math.max(550, Math.round(soloVal - allocVal));
+      }
+      for (const init of completedInitiated) {
+        const pCount = (init.participants || []).length;
+        if (pCount > 0) {
+          calculatedTripSavings += pCount * 650;
+        }
+      }
+
+      const finalSavings = Math.max(storedSavings, calculatedTripSavings);
+
+      setLoyaltyPoints(computedPoints);
+      setSharedSavings(finalSavings);
+
+      if (computedPoints > storedPoints) {
+        await loyaltyStorage.addPoints(computedPoints - storedPoints, user?.id);
+      }
+      if (finalSavings > storedSavings) {
+        await savingsStorage.setSavings(finalSavings, user?.id);
+      }
+    } catch (e) {
+      console.log('Error loading stats:', e);
+    }
+  };
 
   useEffect(() => {
-    loyaltyStorage.getPoints(user?.id).then(setLoyaltyPoints);
-    paymentStorage.get(user?.id).then(setPaymentNumbers);
+    loadUserDataAndStats();
   }, [user?.id]);
 
   useFocusEffect(
     React.useCallback(() => {
       refreshUser().catch((error) => console.log('Profile refresh error:', error));
-    }, [refreshUser]),
+      loadUserDataAndStats();
+    }, [refreshUser, user?.id]),
   );
   const [silentRide, setSilentRide] = useState(false);
   const [autoRideShare, setAutoRideShare] = useState(true);
@@ -82,6 +132,7 @@ export default function PassengerProfileScreen() {
       last_name: user?.last_name || '',
       email: user?.email || '',
       phone_number: (user as any)?.phone_number || '',
+      profile_picture_url: (user as any)?.profile_picture_url || '',
     });
     setProfileEditorVisible(true);
   };
@@ -93,7 +144,12 @@ export default function PassengerProfileScreen() {
     }
     setProfileSaving(true);
     try {
-      await updateProfile({ ...profileForm, first_name: profileForm.first_name.trim(), last_name: profileForm.last_name.trim(), email: profileForm.email.trim() });
+      await updateProfile({
+        ...profileForm,
+        first_name: profileForm.first_name.trim(),
+        last_name: profileForm.last_name.trim(),
+        email: profileForm.email.trim(),
+      });
       setProfileEditorVisible(false);
       Alert.alert('Profile updated', 'Your profile details were saved successfully.');
     } catch (error: any) {
@@ -141,7 +197,11 @@ export default function PassengerProfileScreen() {
       <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={styles.profileTop}>
           <View style={[styles.avatarBox, { backgroundColor: `${colors.primary}25` }]}>
-            <Ionicons name="person-circle-sharp" size={64} color={colors.primary} />
+            {user?.profile_picture_url ? (
+              <Image source={{ uri: user.profile_picture_url }} style={styles.avatarImage} />
+            ) : (
+              <Ionicons name="person-circle-sharp" size={64} color={colors.primary} />
+            )}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.profileName, { color: colors.text }]}>{user?.username || 'GRAP User'}</Text>
@@ -173,19 +233,37 @@ export default function PassengerProfileScreen() {
         </View>
       )}
 
-      {/* MODULE 2: FRESH 0 POINTS & 0 FCFA SAVINGS DASHBOARD */}
+      {/* MODULE 2: OPERATIONAL LOYALTY POINTS & SHARED RIDE SAVINGS DASHBOARD */}
       <View style={[styles.statsRow, { gap: 10 }]}>
-        <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <TouchableOpacity
+          style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+          onPress={() => {
+            Alert.alert(
+              '🏆 GRAP Loyalty Rewards',
+              `Current Balance: ${loyaltyPoints.toLocaleString()} Points\n\n• Earn +50 Pts on every completed ride\n• Unlock VIP matching & exclusive discounts\n• Level: ${loyaltyPoints >= 500 ? 'Platinum Rider 💎' : loyaltyPoints >= 200 ? 'Gold Rider 🥇' : loyaltyPoints >= 50 ? 'Silver Rider 🥈' : 'Bronze Rider 🥉'}`
+            );
+          }}
+          activeOpacity={0.7}
+        >
           <Ionicons name="trophy" size={24} color="#FFD600" />
-          <Text style={styles.statNumber}>{loyaltyPoints} Pts</Text>
+          <Text style={styles.statNumber}>{loyaltyPoints.toLocaleString()} Pts</Text>
           <Text style={[styles.statLabel, { color: colors.subText }]}>Loyalty Points</Text>
-        </View>
+        </TouchableOpacity>
 
-        <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <TouchableOpacity
+          style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+          onPress={() => {
+            Alert.alert(
+              '🌱 Shared Ride Savings',
+              `Total Saved: ${sharedSavings.toLocaleString()} FCFA\n\n• You save up to 45% on every shared trip\n• Reduces traffic congestion in Yaoundé\n• Lower carbon footprint with every shared seat!`
+            );
+          }}
+          activeOpacity={0.7}
+        >
           <Ionicons name="leaf" size={24} color={colors.primary} />
-          <Text style={[styles.statNumber, { color: colors.primary }]}>0 FCFA</Text>
+          <Text style={[styles.statNumber, { color: colors.primary }]}>{sharedSavings.toLocaleString()} FCFA</Text>
           <Text style={[styles.statLabel, { color: colors.subText }]}>Shared Ride Savings</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* MODULE 3: USER-DEFINED SAVED FAVORITE PLACES MODULE */}
@@ -356,6 +434,19 @@ export default function PassengerProfileScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* ADMIN SHORTCUT */}
+      {((user as any)?.role === 'ADMIN' || user?.username === 'admin') && (
+        <TouchableOpacity
+          style={[styles.supportBtn, { backgroundColor: '#FFD60020', borderColor: '#FFD600', borderWidth: 1, marginBottom: 12 }]}
+          onPress={() => router.push('/admin-approval')}
+        >
+          <Ionicons name="shield-checkmark" size={18} color="#FFD600" />
+          <Text style={[styles.supportBtnText, { color: '#FFD600', fontWeight: '900' }]}>
+            🛡️ Open Administrator Executive Dashboard
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {/* MODULE 8: SUPPORT & LOGOUT ACTIONS */}
       <TouchableOpacity style={[styles.supportBtn, { backgroundColor: colors.inputBg }]} onPress={() => Alert.alert('Support', 'Contacting GRAP 24/7 Customer Support (+237 670 00 00 00)...')}>
         <Ionicons name="help-buoy" size={18} color={colors.primary} />
@@ -432,9 +523,33 @@ export default function PassengerProfileScreen() {
               <View style={styles.editorHeading}><View style={[styles.editorAvatar, { backgroundColor: `${colors.primary}20` }]}><Text style={[styles.editorAvatarText, { color: colors.primary }]}>{(user?.username || 'U').charAt(0).toUpperCase()}</Text></View><View><Text style={[styles.modalTitle, { color: colors.text }]}>Edit profile</Text><Text style={[styles.modalSubText, { color: colors.subText }]}>Update your personal details</Text></View></View>
               <TouchableOpacity onPress={() => setProfileEditorVisible(false)} style={styles.editorClose}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity>
             </View>
-            <View style={[styles.usernameBanner, { backgroundColor: colors.inputBg }]}><Ionicons name="at-outline" size={18} color={colors.primary} /><View><Text style={[styles.usernameLabel, { color: colors.subText }]}>Username</Text><Text style={[styles.usernameValue, { color: colors.text }]}>{user?.username || 'GRAP user'}</Text></View><Ionicons name="lock-closed-outline" size={15} color={colors.subText} /></View>
-            <Text style={[styles.editorHint, { color: colors.subText }]}>Your username is your unique account ID and cannot be changed here.</Text>
-            {([['first_name', 'First name'], ['last_name', 'Last name'], ['email', 'Email address'], ['phone_number', 'Phone number']] as const).map(([key, placeholder]) => (
+             <View style={[styles.usernameBanner, { backgroundColor: colors.inputBg }]}><Ionicons name="at-outline" size={18} color={colors.primary} /><View><Text style={[styles.usernameLabel, { color: colors.subText }]}>Username</Text><Text style={[styles.usernameValue, { color: colors.text }]}>{user?.username || 'GRAP user'}</Text></View><Ionicons name="lock-closed-outline" size={15} color={colors.subText} /></View>
+             <Text style={[styles.editorHint, { color: colors.subText }]}>Your username is your unique account ID and cannot be changed here.</Text>
+             <TouchableOpacity style={[styles.editorField, { justifyContent: 'center' }]} onPress={async () => {
+               const result = await ImagePicker.launchImageLibraryAsync({
+                 mediaTypes: ['images'],
+                 allowsEditing: true,
+                 aspect: [1, 1],
+                 quality: 0.7,
+                 base64: true,
+               });
+               if (!result.canceled && result.assets && result.assets.length > 0) {
+                 const asset = result.assets[0];
+                 const uri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+                 setProfileForm((current) => ({ ...current, profile_picture_url: uri }));
+               }
+             }}>
+               <Text style={[styles.editorLabel, { color: colors.text }]}>Profile Picture</Text>
+               {profileForm.profile_picture_url ? (
+                 <Image source={{ uri: profileForm.profile_picture_url }} style={[styles.profilePicturePreview, { borderColor: colors.cardBorder }]} />
+               ) : (
+                 <View style={[styles.profilePicturePlaceholder, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
+                   <Ionicons name="image-outline" size={24} color={colors.subText} />
+                   <Text style={[styles.profilePicturePlaceholderText, { color: colors.subText }]}>Tap to choose photo</Text>
+                 </View>
+               )}
+             </TouchableOpacity>
+             {([['first_name', 'First name'], ['last_name', 'Last name'], ['email', 'Email address'], ['phone_number', 'Phone number']] as const).map(([key, placeholder]) => (
               <View key={key} style={styles.editorField}><Text style={[styles.editorLabel, { color: colors.text }]}>{placeholder}{key !== 'phone_number' && <Text style={{ color: '#FF5252' }}> *</Text>}</Text><TextInput style={[styles.editorInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]} placeholder={key === 'phone_number' ? 'Optional phone number' : placeholder} placeholderTextColor={colors.subText} value={profileForm[key]} onChangeText={(value) => setProfileForm((current) => ({ ...current, [key]: value }))} keyboardType={key === 'email' ? 'email-address' : key === 'phone_number' ? 'phone-pad' : 'default'} autoCapitalize={key === 'email' ? 'none' : 'words'} /></View>
             ))}
             <View style={styles.editorActions}><TouchableOpacity style={[styles.cancelEditorBtn, { borderColor: colors.cardBorder }]} onPress={() => setProfileEditorVisible(false)}><Text style={[styles.cancelEditorText, { color: colors.subText }]}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.saveAddressBtn, styles.saveEditorBtn, { backgroundColor: colors.primary }]} onPress={saveProfile} disabled={profileSaving}><Ionicons name="checkmark" size={17} color="#0B1325" /><Text style={styles.saveAddressBtnText}>{profileSaving ? 'Saving...' : 'Save changes'}</Text></TouchableOpacity></View>
@@ -479,6 +594,12 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
   },
   verificationCard: {
     flexDirection: 'row',
@@ -762,6 +883,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 13,
     fontSize: 14,
+  },
+  profilePicturePreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginTop: 8,
+  },
+  profilePicturePlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginTop: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profilePicturePlaceholderText: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 4,
   },
   editorActions: {
     flexDirection: 'row',

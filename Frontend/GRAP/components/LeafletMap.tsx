@@ -32,7 +32,7 @@ export default function LeafletMap({
   onSelectLocation,
 }: LeafletMapProps) {
   const leafletAssets = Platform.OS === 'web'
-    ? '<link rel="stylesheet" href="/leaflet/leaflet.css" /><script src="/leaflet/leaflet.js"></script>'
+    ? '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>'
     : '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>';
 
   // Leaflet OpenStreetMap HTML with OSRM Real Street Turn-by-Turn Road Polylines
@@ -220,7 +220,7 @@ export default function LeafletMap({
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...(StyleSheet.absoluteFill as object),
     backgroundColor: '#0F172A',
   },
 });

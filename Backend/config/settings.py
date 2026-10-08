@@ -167,3 +167,11 @@ CHANNEL_LAYERS = {
     },
 }
 
+# Campay Payment Gateway Configuration
+CAMPAY_ENV = os.getenv('CAMPAY_ENV', 'demo').lower()
+CAMPAY_BASE_URL = 'https://demo.campay.net/api/' if CAMPAY_ENV == 'demo' else 'https://campay.net/api/'
+CAMPAY_USERNAME = os.getenv('CAMPAY_USERNAME', '')
+CAMPAY_PASSWORD = os.getenv('CAMPAY_PASSWORD', '')
+CAMPAY_APP_TOKEN = os.getenv('CAMPAY_APP_TOKEN', '')
+
+

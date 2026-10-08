@@ -11,9 +11,11 @@ const getBackendUrl = () => {
 
   const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest?.debuggerHost;
   if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-      return `http://${ip}:8000/api`;
+    const lastColon = hostUri.lastIndexOf(':');
+    const ip = lastColon >= 0 ? hostUri.substring(0, lastColon) : hostUri;
+    const cleanedIp = ip.replace(/^\[|\]$/g, '');
+    if (cleanedIp && cleanedIp !== 'localhost' && cleanedIp !== '127.0.0.1') {
+      return `http://${cleanedIp}:8000/api`;
     }
   }
   return 'https://mygrap.onrender.com/api';
@@ -29,7 +31,12 @@ export interface User {
   role: 'PASSENGER' | 'DRIVER' | 'ADMIN';
   first_name: string;
   last_name: string;
+  phone_number: string;
+  profile_picture_url: string;
   is_verified: boolean;
+  is_suspended: boolean;
+  is_staff?: boolean;
+  is_superuser?: boolean;
 }
 
 class ApiService {
@@ -76,14 +83,24 @@ class ApiService {
       throw new Error(`Cannot connect to Backend server (${API_BASE_URL}). Please ensure Django server is running.`);
     }
 
-    const data = await response.json();
-
     if (!response.ok) {
-      const errorMsg = data.detail || data.error || (typeof data === 'object' ? JSON.stringify(data) : 'Request failed');
+      let errorMsg = `Request failed with status ${response.status}`;
+      try {
+        const data = await response.json();
+        errorMsg = data.detail || data.error || (typeof data === 'object' ? JSON.stringify(data) : errorMsg);
+      } catch {
+        const text = await response.text();
+        errorMsg = text ? `${errorMsg}: ${text.slice(0, 200)}` : errorMsg;
+      }
       throw new Error(errorMsg);
     }
 
-    return data as T;
+    try {
+      const data = await response.json();
+      return data as T;
+    } catch {
+      return {} as T;
+    }
   }
 
 
@@ -108,7 +125,7 @@ class ApiService {
     return this.request<{ user: User; profile: any }>('/auth/me/');
   }
 
-  async updateMe(data: { first_name: string; last_name: string; email: string; phone_number: string }) {
+  async updateMe(data: { first_name: string; last_name: string; email: string; phone_number: string; profile_picture_url?: string }) {
     return this.request<User>('/auth/me/', {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -154,6 +171,11 @@ class ApiService {
 
   async getMyRides() {
     return this.request<any[]>('/rides/my-rides/').catch(() => []);
+  }
+
+  async getDriverProposals(categoryId?: number) {
+    const url = categoryId ? `/driver/proposals/?category_id=${categoryId}` : '/driver/proposals/';
+    return this.request<any[]>(url);
   }
 
   async cancelRide(rideId: number) {
@@ -203,6 +225,56 @@ class ApiService {
     });
   }
 
+  async confirmDigitalPayment(rideId: number) {
+    return this.request<any>('/rides/confirm-digital-payment/', {
+      method: 'POST',
+      body: JSON.stringify({ ride_id: rideId }),
+    });
+  }
+
+  async initiateCampayPayment(payload: {
+    ride_id: number;
+    phone_number?: string;
+    operator?: string;
+    participant_id?: number;
+    modal_fare?: number;
+  }) {
+    return this.request<{
+      message: string;
+      reference: string;
+      ussd_code: string;
+      operator: string;
+      status: string;
+      charged_amount: number;
+      modal_amount: number;
+      phone_number: string;
+      ride_id: number;
+      participant_id?: number;
+    }>('/rides/campay/initiate/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async checkCampayStatus(reference: string, rideId?: number) {
+    const url = rideId ? `/rides/campay/status/${reference}/?ride_id=${rideId}` : `/rides/campay/status/${reference}/`;
+    return this.request<{
+      reference: string;
+      status: string;
+      operator?: string;
+      charged_amount?: number;
+      modal_amount?: number;
+      is_completed?: boolean;
+      message: string;
+    }>(url);
+  }
+
+  async rateDriver(rideId: number, score: number, comment?: string) {
+    return this.request<any>('/rides/rate-driver/', {
+      method: 'POST',
+      body: JSON.stringify({ ride_id: rideId, score, comment: comment || '' }),
+    });
+  }
   // Driver APIs
   async toggleDriverStatus(isOnline: boolean, lat?: number, lng?: number) {
     return this.request<any>('/driver/status/', {
@@ -230,10 +302,10 @@ class ApiService {
     return this.request<any>('/driver/earnings/');
   }
 
-  async withdrawEarnings(amount: number) {
+  async withdrawEarnings(payload: { amount: number; phone_number?: string; operator?: 'MTN' | 'ORANGE' }) {
     return this.request<any>('/driver/withdraw/', {
       method: 'POST',
-      body: JSON.stringify({ amount }),
+      body: JSON.stringify(payload),
     });
   }
 

@@ -57,7 +57,9 @@ export default function DriverRequestsScreen() {
           <View key={item.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={styles.cardTop}>
               <View style={[styles.categoryBadge, { backgroundColor: colors.inputBg }]}>
-                <Text style={[styles.categoryText, { color: colors.secondary }]}>{item.category_name || 'Economy'}</Text>
+                <Text style={[styles.categoryText, { color: colors.secondary }]}>
+                  {item.category_name || 'Economy'} • {(Number(item.distance_km) || 4.5).toFixed(1)} km
+                </Text>
               </View>
               <Text style={[styles.fareText, { color: colors.primary }]}>{item.estimated_fare} FCFA</Text>
             </View>
@@ -95,36 +97,10 @@ export default function DriverRequestsScreen() {
           </View>
         ))
       ) : (
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.cardTop}>
-            <View style={[styles.categoryBadge, { backgroundColor: colors.inputBg }]}>
-              <Text style={[styles.categoryText, { color: colors.secondary }]}>Economy • 6.4 km</Text>
-            </View>
-            <Text style={[styles.fareText, { color: colors.primary }]}>2,000 FCFA</Text>
-          </View>
-
-          <Text style={[styles.passengerName, { color: colors.text }]}>Passenger: Jean Kamga</Text>
-
-          <View style={[styles.routeBox, { backgroundColor: colors.inputBg }]}>
-            <View style={styles.routeRow}>
-              <Ionicons name="radio-button-on" size={14} color={colors.primary} />
-              <Text style={[styles.routeText, { color: colors.text }]}>Mvan Bus Station</Text>
-            </View>
-            <View style={styles.routeRow}>
-              <Ionicons name="location-sharp" size={14} color="#FF5252" />
-              <Text style={[styles.routeText, { color: colors.text }]}>Bastos Ambassades</Text>
-            </View>
-          </View>
-
-          <View style={styles.btnRow}>
-            <TouchableOpacity style={[styles.acceptBtn, { backgroundColor: colors.primary }]} onPress={() => Alert.alert('Accepted', 'Accepted ride from Mvan to Bastos!')}>
-              <Text style={styles.acceptBtnText}>Accept Ride</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.rejectBtn}>
-              <Text style={styles.rejectBtnText}>Decline</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 20, alignItems: 'center' }]}>
+          <Ionicons name="car-outline" size={32} color={colors.subText} style={{ marginBottom: 8 }} />
+          <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '700' }]}>No Pending Ride Requests</Text>
+          <Text style={[{ color: colors.subText, fontSize: 12, marginTop: 4, textAlign: 'center' }]}>New passenger pickup requests will appear here in real-time.</Text>
         </View>
       )}
     </ScrollView>

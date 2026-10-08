@@ -1,6 +1,6 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -14,22 +14,33 @@ export default function TabLayout() {
   const { contentPadding, isWeb } = useResponsive();
 
   const isDriver = role === 'DRIVER';
+  // Admin detection: check role, Django is_staff/is_superuser flags, and known admin usernames
+  const isAdmin =
+    role === 'ADMIN' ||
+    user?.role === 'ADMIN' ||
+    (user as any)?.is_staff === true ||
+    (user as any)?.is_superuser === true ||
+    user?.username === 'admin';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Top Header strictly displaying logged-in user profile, EN/FR language & Dark/Light theme */}
       <View style={[styles.topHeader, { backgroundColor: colors.card, borderBottomColor: colors.cardBorder, paddingHorizontal: contentPadding, paddingTop: isWeb ? 18 : 44 }]}>
         <View style={styles.userInfo}>
-          <View style={[styles.avatarCircle, { borderColor: colors.primary }]}>
+        <View style={[styles.avatarCircle, { borderColor: colors.primary }]}>
+          {user?.profile_picture_url ? (
+            <Image source={{ uri: user.profile_picture_url }} style={styles.avatarImage} />
+          ) : (
             <Text style={[styles.avatarText, { color: colors.primary }]}>
               {user?.username?.charAt(0).toUpperCase() || 'U'}
             </Text>
-          </View>
+          )}
+        </View>
           <View>
             <Text style={[styles.userName, { color: colors.text }]}>{user?.username || 'GRAP User'}</Text>
-            <View style={[styles.roleBadge, { backgroundColor: isDriver ? 'rgba(41, 182, 246, 0.15)' : 'rgba(0, 230, 118, 0.15)' }]}>
-              <Text style={[styles.roleBadgeText, { color: isDriver ? colors.secondary : colors.primary }]}>
-                {isDriver ? t('driverMode').toUpperCase() : t('riderMode').toUpperCase()}
+            <View style={[styles.roleBadge, { backgroundColor: isAdmin ? 'rgba(255, 214, 0, 0.15)' : isDriver ? 'rgba(41, 182, 246, 0.15)' : 'rgba(0, 230, 118, 0.15)' }]}>
+              <Text style={[styles.roleBadgeText, { color: isAdmin ? '#FFD600' : isDriver ? colors.secondary : colors.primary }]}>
+                {isAdmin ? 'ADMINISTRATOR' : isDriver ? t('driverMode').toUpperCase() : t('riderMode').toUpperCase()}
               </Text>
             </View>
           </View>
@@ -37,6 +48,7 @@ export default function TabLayout() {
 
         {/* Header Controls: Language EN/FR, Theme 🌙/☀️, Logout */}
         <View style={styles.controlsRow}>
+
           {/* Language Switcher EN/FR */}
           <TouchableOpacity
             style={[styles.miniPill, { backgroundColor: colors.bg }]}
@@ -57,136 +69,129 @@ export default function TabLayout() {
         </View>
       </View>
 
-      {/* Tabs Layout: Strictly shows 5 active tabs for the authenticated role */}
+      {/* Tabs Layout: role-based tabs — admins see ONLY admin tab */}
       <View style={styles.tabsShell}>
         <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarStyle: [styles.tabBar, { backgroundColor: colors.card, borderTopColor: colors.cardBorder }],
-          tabBarActiveTintColor: isDriver ? colors.secondary : colors.primary,
-          tabBarInactiveTintColor: colors.subText,
-          tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
-        }}
-      >
-        {/* PASSENGER TABS (5 Max) */}
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: t('home'),
-            href: isDriver ? null : '/',
-            tabBarItemStyle: isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
+          screenOptions={{
+            headerShown: false,
+            tabBarStyle: [
+              styles.tabBar,
+              { backgroundColor: colors.card, borderTopColor: colors.cardBorder },
+            ],
+            tabBarActiveTintColor: isAdmin ? '#FFD600' : isDriver ? colors.secondary : colors.primary,
+            tabBarInactiveTintColor: colors.subText,
+            tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
           }}
-        />
+        >
+          {/* ── PASSENGER TABS: hidden for drivers AND admins ── */}
+          <Tabs.Screen
+            name="index"
+            options={{
+              title: t('home'),
+              href: (!isDriver && !isAdmin) ? '/' : null,
+              tabBarItemStyle: (isDriver || isAdmin) ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="rides"
+            options={{
+              title: t('rides'),
+              href: (!isDriver && !isAdmin) ? '/rides' : null,
+              tabBarItemStyle: (isDriver || isAdmin) ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="car-sport" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="places"
+            options={{
+              title: t('places'),
+              href: (!isDriver && !isAdmin) ? '/places' : null,
+              tabBarItemStyle: (isDriver || isAdmin) ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="compass" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="notifications"
+            options={{
+              title: t('notifications'),
+              href: (!isDriver && !isAdmin) ? '/notifications' : null,
+              tabBarItemStyle: (isDriver || isAdmin) ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="profile"
+            options={{
+              title: t('profile'),
+              href: (!isDriver && !isAdmin) ? '/profile' : null,
+              tabBarItemStyle: (isDriver || isAdmin) ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+            }}
+          />
 
-        <Tabs.Screen
-          name="rides"
-          options={{
-            title: t('rides'),
-            href: isDriver ? null : '/rides',
-            tabBarItemStyle: isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="car-sport" size={size} color={color} />,
-          }}
-        />
+          {/* ── DRIVER TABS: hidden for passengers AND admins ── */}
+          <Tabs.Screen
+            name="driver-home"
+            options={{
+              title: t('home'),
+              href: isDriver ? '/driver-home' : null,
+              tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="driver-requests"
+            options={{
+              title: t('requests'),
+              href: isDriver ? '/driver-requests' : null,
+              tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="driver-earnings"
+            options={{
+              title: t('earnings'),
+              href: isDriver ? '/driver-earnings' : null,
+              tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="wallet" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="driver-ai-analytics"
+            options={{
+              title: t('analytics'),
+              href: isDriver ? '/driver-ai-analytics' : null,
+              tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="sparkles" size={size} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="driver-profile"
+            options={{
+              title: t('profile'),
+              href: isDriver ? '/driver-profile' : null,
+              tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+            }}
+          />
 
-        <Tabs.Screen
-          name="places"
-          options={{
-            title: t('places'),
-            href: isDriver ? null : '/places',
-            tabBarItemStyle: isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="compass" size={size} color={color} />,
-          }}
-        />
+          {/* ── ALWAYS HIDDEN utility screens ── */}
+          <Tabs.Screen name="share-ride" options={{ href: null, tabBarItemStyle: { display: 'none' } }} />
+          <Tabs.Screen name="active-ride" options={{ href: null, tabBarItemStyle: { display: 'none' } }} />
+          <Tabs.Screen name="driver-dashboard" options={{ href: null, tabBarItemStyle: { display: 'none' } }} />
 
-        <Tabs.Screen
-          name="notifications"
-          options={{
-            title: t('notifications'),
-            href: isDriver ? null : '/notifications',
-            tabBarItemStyle: isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size} color={color} />,
-          }}
-        />
-
-        <Tabs.Screen
-          name="profile"
-          options={{
-            title: t('profile'),
-            href: isDriver ? null : '/profile',
-            tabBarItemStyle: isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
-          }}
-        />
-
-        {/* DRIVER TABS (5 Max) */}
-        <Tabs.Screen
-          name="driver-home"
-          options={{
-            title: t('home'),
-            href: isDriver ? '/driver-home' : null,
-            tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
-          }}
-        />
-
-        <Tabs.Screen
-          name="driver-requests"
-          options={{
-            title: t('requests'),
-            href: isDriver ? '/driver-requests' : null,
-            tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
-          }}
-        />
-
-        <Tabs.Screen
-          name="driver-earnings"
-          options={{
-            title: t('earnings'),
-            href: isDriver ? '/driver-earnings' : null,
-            tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="wallet" size={size} color={color} />,
-          }}
-        />
-
-        <Tabs.Screen
-          name="driver-ai-analytics"
-          options={{
-            title: t('analytics'),
-            href: isDriver ? '/driver-ai-analytics' : null,
-            tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="sparkles" size={size} color={color} />,
-          }}
-        />
-
-        <Tabs.Screen
-          name="driver-profile"
-          options={{
-            title: t('profile'),
-            href: isDriver ? '/driver-profile' : null,
-            tabBarItemStyle: !isDriver ? { display: 'none' } : undefined,
-            tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
-          }}
-        />
-
-        {/* Hidden legacy admin tabs */}
-        <Tabs.Screen
-          name="share-ride"
-          options={{ href: null, tabBarItemStyle: { display: 'none' } }}
-        />
-        <Tabs.Screen
-          name="active-ride"
-          options={{ href: null, tabBarItemStyle: { display: 'none' } }}
-        />
-        <Tabs.Screen
-          name="driver-dashboard"
-          options={{ href: null, tabBarItemStyle: { display: 'none' } }}
-        />
-        <Tabs.Screen
-          name="admin-approval"
-          options={{ href: null, tabBarItemStyle: { display: 'none' } }}
-        />
+          {/* ── ADMIN TAB: only visible to admins ── */}
+          <Tabs.Screen
+            name="admin-approval"
+            options={{
+              title: 'Admin Hub',
+              href: isAdmin ? '/admin-approval' : null,
+              tabBarItemStyle: !isAdmin ? { display: 'none' } : undefined,
+              tabBarIcon: ({ color, size }) => <Ionicons name="shield-checkmark" size={size} color={color} />,
+            }}
+          />
         </Tabs>
       </View>
     </View>
@@ -224,6 +229,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
   },
   avatarText: {
     fontWeight: '800',

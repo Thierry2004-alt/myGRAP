@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Alert, Modal, Share, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Alert, Modal, Share, Platform, Image, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import GoogleDriverMap from '../../components/GoogleDriverMap';
 import { api } from '../../services/api';
-import { activeRideStorage, loyaltyStorage } from '../../services/storage';
+import { activeRideStorage, loyaltyStorage, dismissedRideStorage, savingsStorage } from '../../services/storage';
 import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
@@ -22,6 +22,7 @@ interface AlternativeDriverProposal {
   eta: string;
   distance: string;
   vehicleType: 'MOTO' | 'CAR';
+  driver_profile_picture_url?: string;
 }
 
 export default function PassengerRidesScreen() {
@@ -40,6 +41,8 @@ export default function PassengerRidesScreen() {
   const paramPickupLng = parseFloat(params.pickup_lng as string) || 11.5000;
   const paramDestLat = parseFloat(params.dest_lat as string) || 3.8750;
   const paramDestLng = parseFloat(params.dest_lng as string) || 11.5180;
+
+  const dismissedRideIdsRef = useRef<Set<string>>(new Set());
 
   const [activeRide, setActiveRide] = useState<any | null>(null);
   const [completedRides, setCompletedRides] = useState<any[]>([]);
@@ -60,49 +63,65 @@ export default function PassengerRidesScreen() {
   const [inputPin, setInputPin] = useState('');
   const [isVerified, setIsVerified] = useState(false);
 
-  // CROSS-CATEGORY ALTERNATIVE DRIVER PROPOSALS
-  const alternativeDrivers: AlternativeDriverProposal[] = [
-    {
-      id: 'alt-moto',
-      category: 'Moto (Motorcycle Taxi)',
-      catBadgeColor: '#00E676',
-      fare: '700 FCFA',
-      driverName: 'Eric Nseng',
-      vehicleInfo: 'TVS HLX 150 • CE-441-XY',
-      rating: '4.8 (38 rides)',
-      eta: '2 mins away',
-      distance: '1.2 km',
-      vehicleType: 'MOTO',
-    },
-    {
-      id: 'alt-comfort',
-      category: 'Comfort Sedan',
-      catBadgeColor: '#0288D1',
-      fare: '1,850 FCFA',
-      driverName: 'Alain Manga',
-      vehicleInfo: 'Toyota Corolla • CE-882-ZZ',
-      rating: '4.95 (96 rides)',
-      eta: '3 mins away',
-      distance: '0.8 km',
-      vehicleType: 'CAR',
-    },
-    {
-      id: 'alt-comfort-plus',
-      category: 'Comfort+ Executive VIP',
-      catBadgeColor: '#FFD600',
-      fare: '2,650 FCFA',
-      driverName: 'Samuel Eto\'o',
-      vehicleInfo: 'Hyundai Santa Fe • CE-001-VIP',
-      rating: '5.0 (140 rides)',
-      eta: '4 mins away',
-      distance: '1.5 km',
-      vehicleType: 'CAR',
-    },
-  ];
+  // CAMPAY MOBILE MONEY STATE
+  const [momoPhone, setMomoPhone] = useState('677123456');
+  const [momoOperator, setMomoOperator] = useState<'MTN' | 'ORANGE'>('MTN');
+  const [campayLoading, setCampayLoading] = useState(false);
+  const [campayRef, setCampayRef] = useState<string | null>(null);
+  const [campayUssdCode, setCampayUssdCode] = useState<string | null>(null);
+  const [campayPolling, setCampayPolling] = useState(false);
+
+  // DRIVER RATING AFTER RIDE COMPLETION
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingScore, setRatingScore] = useState(5);
+  const [ratingComment, setRatingComment] = useState('');
+  const [completedRideId, setCompletedRideId] = useState<number | null>(null);
+  const [submittingRating, setSubmittingRating] = useState(false);
+
+  // DYNAMIC DRIVER PROPOSALS
+  const [driverProposals, setDriverProposals] = useState<AlternativeDriverProposal[]>([]);
+  const [loadingProposals, setLoadingProposals] = useState(false);
+
+  const loadDriverProposals = async () => {
+    setLoadingProposals(true);
+    try {
+      const data = await api.getDriverProposals();
+      const mapped: AlternativeDriverProposal[] = (data || []).map((d: any, idx: number) => {
+        const categoryCode = (d.vehicle_category || 'ECONOMY').toUpperCase();
+        const catBadgeColor = categoryCode === 'MOTO' ? '#00E676' : categoryCode === 'COMFORT' ? '#0288D1' : categoryCode === 'COMFORT_PLUS' ? '#FFD600' : '#29B6F6';
+        const fare = categoryCode === 'MOTO' ? '700 FCFA' : categoryCode === 'COMFORT' ? '1,850 FCFA' : categoryCode === 'COMFORT_PLUS' ? '2,650 FCFA' : '850 FCFA';
+        return {
+          id: `driver-${d.id}`,
+          category: categoryCode === 'MOTO' ? 'Moto (Motorcycle Taxi)' : categoryCode === 'COMFORT' ? 'Comfort Sedan' : categoryCode === 'COMFORT_PLUS' ? 'Comfort+ Executive VIP' : 'Economy Taxi',
+          catBadgeColor,
+          fare,
+          driverName: d.driver_name || 'Driver',
+          vehicleInfo: d.vehicle_info || 'Vehicle',
+          rating: `${d.rating_avg || 4.9} (${d.total_rides || 0} rides)`,
+          eta: '2 mins away',
+          distance: '1.0 km',
+          vehicleType: categoryCode === 'MOTO' ? 'MOTO' : 'CAR',
+          driver_profile_picture_url: d.driver_profile_picture_url || '',
+          driver_phone_number: d.driver_phone_number || '+237670003344',
+        };
+      });
+      setDriverProposals(mapped);
+      return mapped;
+    } catch (e) {
+      console.log('Error loading driver proposals:', e);
+      return [];
+    } finally {
+      setLoadingProposals(false);
+    }
+  };
 
   useEffect(() => {
     fetchLiveActiveRide();
   }, [paramRideId]);
+
+  useEffect(() => {
+    loadDriverProposals();
+  }, []);
 
   useEffect(() => {
     if (activeRide?.pickup_lat && activeRide?.pickup_lng) {
@@ -111,12 +130,12 @@ export default function PassengerRidesScreen() {
   }, [activeRide?.pickup_lat, activeRide?.pickup_lng]);
 
   useEffect(() => {
-    if (activeRide && params.shared === '1' && !passengerAccepted) {
+    if (activeRide && params.shared === '1') {
       setPassengerAccepted(true);
       setAcceptedRideId(String(activeRide.id));
       activeRideStorage.save({ ...activeRide, passengerAccepted: true });
     }
-  }, [activeRide?.id, passengerAccepted, params.shared]);
+  }, [activeRide?.id, params.shared]);
 
   useEffect(() => {
     const loadParticipants = async () => {
@@ -127,27 +146,49 @@ export default function PassengerRidesScreen() {
       try {
         const shared = await api.getMySharedRides().catch(() => ({ joined: [], initiated: [] }));
         const initiated = shared.initiated || [];
+        const joined = shared.joined || [];
         const rideId = Number(activeRide.id);
-        console.log('Loading participants for rideId:', rideId, 'initiated count:', initiated.length, 'initiated sample:', JSON.stringify(initiated[0]).slice(0, 200));
-        const match = initiated.find((item: any) => {
+
+        let matchSharedRideId: number | null = null;
+        const initMatch = initiated.find((item: any) => {
           const itemSharedId = Number(item?.shared_ride_id || 0);
           const primaryRideId = Number(item?.primary_ride?.id || item?.primary_ride_id || 0);
           const rideIdField = Number(item?.ride_id || 0);
-          const sample = initiated[0] ? JSON.stringify(initiated[0]).slice(0, 200) : 'N/A';
-          console.log('Checking item:', itemSharedId, primaryRideId, rideIdField, 'vs', rideId, 'initiated sample:', sample);
           return itemSharedId === rideId || primaryRideId === rideId || rideIdField === rideId;
         });
-        console.log('Shared ride match:', match);
-        if (match?.shared_ride_id) {
-          const status = await api.getSharedRideStatus(match.shared_ride_id);
-          console.log('Shared ride status participants:', status?.participants);
+
+        if (initMatch?.shared_ride_id) {
+          matchSharedRideId = initMatch.shared_ride_id;
+        } else {
+          const joinedMatch = joined.find((item: any) => {
+            const sharedId = Number(item?.shared_ride || item?.shared_ride_id || 0);
+            const primaryId = Number(item?.primary_ride_id || item?.primary_ride?.id || 0);
+            return sharedId === rideId || primaryId === rideId;
+          });
+          if (joinedMatch) {
+            matchSharedRideId = Number(joinedMatch.shared_ride || joinedMatch.shared_ride_id);
+          }
+        }
+
+        if (matchSharedRideId) {
+          const status = await api.getSharedRideStatus(matchSharedRideId);
           const list = status?.participants || [];
           setParticipants(list);
-          if (list.length === 0 && status?.shared_ride_id) {
-            console.log('Shared ride exists but no participants yet');
+          if (status?.primary_ride) {
+            setActiveRide((prev: any) => prev ? {
+              ...prev,
+              primary_estimated_fare: status.primary_ride.estimated_fare,
+              driver_name: status.primary_ride.driver_name || prev.driver_name,
+              driver_profile_picture_url: status.primary_ride.driver_profile_picture_url || prev.driver_profile_picture_url,
+              driver_phone_number: status.primary_ride.driver_phone_number || prev.driver_phone_number,
+              cash_otp: status.primary_ride.cash_otp || prev.cash_otp,
+              initiator_name: status.initiator?.name || status.initiator?.username || status.primary_ride.passenger_name || prev.initiator_name,
+              initiator_username: status.initiator?.username || status.primary_ride.passenger_username || prev.initiator_username,
+              initiator_profile_picture_url: status.initiator?.profile_picture_url || status.primary_ride.passenger_profile_picture_url || prev.initiator_profile_picture_url || '',
+              initiator_phone: status.initiator?.phone || status.primary_ride.passenger_phone || prev.initiator_phone,
+            } : prev);
           }
         } else {
-          console.log('No shared ride match found for rideId:', rideId, 'available ids:', initiated.map((i: any) => ({ shared_ride_id: i?.shared_ride_id, primary_ride_id: i?.primary_ride?.id, ride_id: i?.ride_id })));
           setParticipants([]);
         }
       } catch (e) {
@@ -157,24 +198,98 @@ export default function PassengerRidesScreen() {
     };
 
     loadParticipants();
-    const interval = setInterval(loadParticipants, 5000);
+    const interval = setInterval(loadParticipants, 4000);
     return () => clearInterval(interval);
   }, [activeRide?.id]);
 
   useWebSocket({
     rideId: activeRide?.id,
     onMessage: (data) => {
-      if (data.type === 'participant_joined') {
-        setParticipants((prev) => [...prev, data.data]);
-      } else if (data.type === 'ride_cancelled') {
+      const eventType = data.type || data.event;
+      const eventData = data.data || data;
+
+      if (eventType === 'participant_joined') {
+        setParticipants((prev) => [...prev, eventData]);
+      } else if (eventType === 'ride_cancelled') {
+        const cancelledId = eventData?.ride_id || activeRide?.id || paramRideId;
+        if (cancelledId) {
+          dismissedRideIdsRef.current.add(String(cancelledId));
+          dismissedRideStorage.addId(cancelledId);
+        }
         Alert.alert('Ride Cancelled', 'This ride has been cancelled.');
+        activeRideStorage.clear();
         setActiveRide(null);
         setPassengerAccepted(false);
-        router.replace('/');
+        setAcceptedRideId(null);
+        setParticipants([]);
+        setShowPaymentPrompt(false);
+        router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
+      } else if (eventType === 'ride_completed') {
+        const finishedId = eventData?.ride_id || activeRide?.id || paramRideId;
+        if (finishedId) {
+          dismissedRideIdsRef.current.add(String(finishedId));
+          dismissedRideStorage.addId(finishedId);
+        }
+        activeRideStorage.clear();
+        setActiveRide(null);
+        setPassengerAccepted(false);
+        setAcceptedRideId(null);
+        setParticipants([]);
+        setShowPaymentPrompt(false);
+        router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
+        if (finishedId) {
+          setCompletedRideId(Number(finishedId));
+          setShowRatingModal(true);
+        }
+        api.getMyRides().then((res) => {
+          if (Array.isArray(res)) setCompletedRides(res.filter((r) => r.status === 'COMPLETED'));
+        }).catch(() => {});
+      } else if (eventType === 'ride_status_updated') {
+        const newStatus = eventData?.status;
+        if (newStatus === 'COMPLETED') {
+          const finishedId = eventData?.ride_id || activeRide?.id || paramRideId;
+          if (finishedId) {
+            dismissedRideIdsRef.current.add(String(finishedId));
+            dismissedRideStorage.addId(finishedId);
+          }
+          activeRideStorage.clear();
+          setActiveRide(null);
+          setPassengerAccepted(false);
+          setAcceptedRideId(null);
+          setParticipants([]);
+          setShowPaymentPrompt(false);
+          router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
+          if (finishedId) {
+            setCompletedRideId(Number(finishedId));
+            setShowRatingModal(true);
+          }
+          api.getMyRides().then((res) => {
+            if (Array.isArray(res)) setCompletedRides(res.filter((r) => r.status === 'COMPLETED'));
+          }).catch(() => {});
+        } else if (newStatus) {
+          setActiveRide((prev: any) => (prev ? { ...prev, status: newStatus } : null));
+        }
+      } else if (eventType === 'ride_accepted') {
+        setActiveRide((prev: any) => (prev ? { ...prev, ...eventData, status: 'ACCEPTED' } : eventData));
       }
     },
     reconnectInterval: 2000,
   });
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handler = (event: MessageEvent) => {
+      const data = event.data;
+      const msg = typeof data === 'string' ? data : data?.type;
+      if (msg === 'ARRIVED_PICKUP') {
+        handleAutomatedPickupArrival();
+      } else if (msg === 'ARRIVED_DESTINATION') {
+        handleAutomatedDestinationArrival();
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
 
   // SAVE ACTIVE RIDE TO STORAGE EVERY TIME IT UPDATES (PERSISTENT ACROSS TAB SWITCHES)
   useEffect(() => {
@@ -208,84 +323,223 @@ export default function PassengerRidesScreen() {
 
   const fetchLiveActiveRide = async () => {
     setLoading(true);
+    let storedRide: any = null;
     try {
-      const storedRide = await activeRideStorage.get();
+      // 1. Sync persisted dismissed IDs
+      const persistedDismissed = await dismissedRideStorage.getIds();
+      persistedDismissed.forEach((id) => dismissedRideIdsRef.current.add(String(id)));
+
+      storedRide = await activeRideStorage.get();
       const myRides = await api.getMyRides();
+      
+      // Mark all completed / cancelled rides as dismissed
+      if (Array.isArray(myRides)) {
+        for (const r of myRides) {
+          if (r.status === 'COMPLETED' || r.payment_status === 'CONFIRMED' || String(r.status || '').startsWith('CANCELLED')) {
+            dismissedRideIdsRef.current.add(String(r.id));
+            await dismissedRideStorage.addId(r.id);
+          }
+        }
+      }
+
       setCompletedRides(Array.isArray(myRides) ? myRides.filter((ride) => ride.status === 'COMPLETED') : []);
       const shared = await api.getMySharedRides().catch(() => ({ joined: [], initiated: [] }));
       setSharedHistory(shared.joined || []);
 
-      // The API is authoritative. Do not show a locally cached ride that was
-      // deleted, cancelled, or no longer belongs to the current account.
-      const storedRideId = storedRide?.id ? Number(storedRide.id) : null;
-      const serverRide = Array.isArray(myRides) && storedRideId
-        ? myRides.find((ride) => Number(ride.id) === storedRideId)
-        : null;
+      if (Array.isArray(shared.joined)) {
+        for (const j of shared.joined) {
+          if (j.payment_status === 'CONFIRMED' || j.primary_status === 'COMPLETED' || String(j.primary_status || '').startsWith('CANCELLED')) {
+            if (j.id) { dismissedRideIdsRef.current.add(String(j.id)); await dismissedRideStorage.addId(j.id); }
+            if (j.shared_ride) { dismissedRideIdsRef.current.add(String(j.shared_ride)); await dismissedRideStorage.addId(j.shared_ride); }
+            if (j.primary_ride_id) { dismissedRideIdsRef.current.add(String(j.primary_ride_id)); await dismissedRideStorage.addId(j.primary_ride_id); }
+          }
+        }
+      }
 
-      if (storedRide && storedRide.status !== 'COMPLETED' && !storedRide.status.startsWith('CANCELLED')) {
-        if (!serverRide || serverRide.status === 'COMPLETED' || serverRide.status.startsWith('CANCELLED')) {
+      const activeParamId = paramRideId && paramRideId.trim() !== '' && !dismissedRideIdsRef.current.has(String(paramRideId)) ? String(paramRideId) : null;
+
+      if (activeParamId) {
+        const serverRide = Array.isArray(myRides)
+          ? myRides.find((ride) => Number(ride.id) === Number(activeParamId))
+          : null;
+
+        if (serverRide && (serverRide.status === 'COMPLETED' || serverRide.status.startsWith('CANCELLED') || serverRide.payment_status === 'CONFIRMED' || dismissedRideIdsRef.current.has(String(serverRide.id)))) {
+          dismissedRideIdsRef.current.add(String(serverRide.id));
+          await dismissedRideStorage.addId(serverRide.id);
           await activeRideStorage.clear();
           setActiveRide(null);
           setPassengerAccepted(false);
-        } else {
-          setActiveRide({ ...serverRide, ...storedRide });
+          setAcceptedRideId(null);
+          setLoading(false);
+          router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
+          return;
+        } else if (serverRide && serverRide.status !== 'COMPLETED' && !serverRide.status.startsWith('CANCELLED')) {
+          const merged = { ...storedRide, ...serverRide, id: serverRide.id, driver_profile_picture_url: serverRide.driver_profile_picture_url || storedRide?.driver_profile_picture_url || '' };
+          setActiveRide(merged);
+          await activeRideStorage.save(merged);
+          setLoading(false);
+          return;
+        } else if (!serverRide && storedRide && String(storedRide.id) === activeParamId && !dismissedRideIdsRef.current.has(String(storedRide.id))) {
+          setActiveRide(storedRide);
           if (storedRide.passengerAccepted) {
             setPassengerAccepted(true);
+            setAcceptedRideId(String(storedRide.id));
+          }
+          setLoading(false);
+          return;
+        } else if (!serverRide && !storedRide && params.pickup && params.dest && !dismissedRideIdsRef.current.has(activeParamId)) {
+          const proposals = await loadDriverProposals();
+          const firstProposal = proposals && proposals.length > 0 ? proposals[0] : null;
+          const isJoinerParam = params.shared === '1';
+          const joinedFareParam = Number(params.fare || 750);
+          const newRideObj = {
+            id: activeParamId,
+            status: 'ACCEPTED',
+            driver_name: firstProposal?.driverName || 'Paul Nkoa',
+            vehicle_info: firstProposal?.vehicleInfo || 'Toyota Yaris • CE-992-AA',
+            pickup_name: paramPickup,
+            pickup_lat: paramPickupLat,
+            pickup_lng: paramPickupLng,
+            destination_name: paramDest,
+            destination_lat: paramDestLat,
+            destination_lng: paramDestLng,
+            payment_method: paramPay,
+            driver_profile_picture_url: firstProposal?.driver_profile_picture_url || '',
+            is_shared: isJoinerParam,
+            is_joiner: isJoinerParam,
+            allocated_shared_fare: isJoinerParam ? joinedFareParam : undefined,
+            estimated_fare: isJoinerParam ? joinedFareParam : undefined,
+            final_fare: isJoinerParam ? joinedFareParam : undefined,
+            primary_estimated_fare: isJoinerParam ? (joinedFareParam + 850) : undefined,
+            cash_otp: '4892',
+            passengerAccepted: isJoinerParam,
+          };
+          setActiveRide(newRideObj);
+          if (isJoinerParam) {
+            setPassengerAccepted(true);
+            setAcceptedRideId(activeParamId);
+          }
+          await activeRideStorage.save(newRideObj);
+          setLoading(false);
+          return;
+        }
+      }
+
+      const storedRideId = storedRide?.id ? String(storedRide.id) : null;
+      if (storedRideId && dismissedRideIdsRef.current.has(storedRideId)) {
+        await activeRideStorage.clear();
+        setActiveRide(null);
+        setPassengerAccepted(false);
+        setAcceptedRideId(null);
+      } else if (storedRide && storedRide.status !== 'COMPLETED' && !storedRide.status.startsWith('CANCELLED') && storedRide.payment_status !== 'CONFIRMED' && !dismissedRideIdsRef.current.has(storedRideId || '')) {
+        const serverRide = Array.isArray(myRides) && storedRideId
+          ? myRides.find((ride) => String(ride.id) === storedRideId)
+          : null;
+
+        if (serverRide && (serverRide.status === 'COMPLETED' || serverRide.status.startsWith('CANCELLED') || serverRide.payment_status === 'CONFIRMED' || dismissedRideIdsRef.current.has(String(serverRide.id)))) {
+          if (serverRide?.id) {
+            dismissedRideIdsRef.current.add(String(serverRide.id));
+            await dismissedRideStorage.addId(serverRide.id);
+          }
+          await activeRideStorage.clear();
+          setActiveRide(null);
+          setPassengerAccepted(false);
+          setAcceptedRideId(null);
+        } else if (serverRide) {
+          const merged = { ...serverRide, ...storedRide, driver_profile_picture_url: serverRide.driver_profile_picture_url || storedRide?.driver_profile_picture_url || '' };
+          setActiveRide(merged);
+          if (storedRide.passengerAccepted) {
+            setPassengerAccepted(true);
+            setAcceptedRideId(String(storedRide.id));
+          }
+          setLoading(false);
+          return;
+        } else {
+          setActiveRide(storedRide);
+          if (storedRide.passengerAccepted) {
+            setPassengerAccepted(true);
+            setAcceptedRideId(String(storedRide.id));
           }
           setLoading(false);
           return;
         }
       }
 
-      setCompletedRides(Array.isArray(myRides) ? myRides.filter((ride) => ride.status === 'COMPLETED') : []);
+      // Check for any pending initiator rides from server
       if (Array.isArray(myRides) && myRides.length > 0) {
-        const pending = myRides.find((r) => r.status !== 'COMPLETED' && !r.status.startsWith('CANCELLED'));
+        const pending = myRides.find((r) => r.status !== 'COMPLETED' && !String(r.status || '').startsWith('CANCELLED') && r.payment_status !== 'CONFIRMED' && !dismissedRideIdsRef.current.has(String(r.id)));
         if (pending) {
           setActiveRide(pending);
-        } else {
-          setActiveRide(null);
+          await activeRideStorage.save(pending);
+          setLoading(false);
+          return;
         }
-      } else       if (paramRideId) {
-        const newRideObj = {
-          id: paramRideId,
-          status: 'ACCEPTED',
-          driver_name: 'Paul Nkoa',
-          vehicle_info: 'Toyota Yaris • CE-992-AA',
-          pickup_name: paramPickup,
-          pickup_lat: paramPickupLat,
-          pickup_lng: paramPickupLng,
-          destination_name: paramDest,
-          destination_lat: paramDestLat,
-          destination_lng: paramDestLng,
-          payment_method: paramPay,
-        };
-        setActiveRide(newRideObj);
-        await activeRideStorage.save(newRideObj);
-      } else {
-        setActiveRide(null);
       }
+
+      // If user is not the primary initiator, check if they are an active participant in a joined shared ride
+      if (Array.isArray(shared.joined) && shared.joined.length > 0) {
+        const activeJoined = shared.joined.find((j: any) => 
+          j.payment_status !== 'CONFIRMED' && 
+          j.primary_status !== 'COMPLETED' && 
+          !String(j.primary_status || '').startsWith('CANCELLED') &&
+          !dismissedRideIdsRef.current.has(String(j.id)) &&
+          !dismissedRideIdsRef.current.has(String(j.shared_ride)) &&
+          !dismissedRideIdsRef.current.has(String(j.primary_ride_id))
+        );
+        if (activeJoined) {
+          const joinedObj = {
+            id: activeJoined.primary_ride_id || activeJoined.shared_ride,
+            shared_ride_id: activeJoined.shared_ride,
+            participant_id: activeJoined.id,
+            is_shared: true,
+            is_joiner: true,
+            allocated_shared_fare: activeJoined.allocated_shared_fare || 750,
+            estimated_fare: activeJoined.allocated_shared_fare || 750,
+            final_fare: activeJoined.allocated_shared_fare || 750,
+            primary_estimated_fare: activeJoined.primary_estimated_fare || 1500,
+            distance_km: activeJoined.solo_distance_km || 3.5,
+            pickup_name: activeJoined.pickup_name || 'Pickup',
+            destination_name: activeJoined.destination_name || 'Destination',
+            driver_name: activeJoined.driver_name || 'Paul Nkoa',
+            vehicle_info: 'Toyota Yaris • CE-992-AA',
+            driver_profile_picture_url: activeJoined.driver_profile_picture_url || '',
+            driver_phone_number: activeJoined.driver_phone_number || '+237670003344',
+            cash_otp: activeJoined.cash_otp || '4892',
+            status: activeJoined.primary_status || 'ACCEPTED',
+            passengerAccepted: true,
+          };
+          setActiveRide(joinedObj);
+          setPassengerAccepted(true);
+          setAcceptedRideId(String(joinedObj.id));
+          await activeRideStorage.save(joinedObj);
+          setLoading(false);
+          return;
+        }
+      }
+
+      setActiveRide(null);
+      await activeRideStorage.clear();
     } catch (e) {
-      if (paramRideId) {
-        const fallbackObj = {
-          id: paramRideId,
-          status: 'ACCEPTED',
-          driver_name: 'Paul Nkoa',
-          vehicle_info: 'Toyota Yaris • CE-992-AA',
-          pickup_name: paramPickup,
-          pickup_lat: paramPickupLat,
-          pickup_lng: paramPickupLng,
-          destination_name: paramDest,
-          destination_lat: paramDestLat,
-          destination_lng: paramDestLng,
-          payment_method: paramPay,
-        };
-        setActiveRide(fallbackObj);
-        await activeRideStorage.save(fallbackObj);
-      } else {
-        setActiveRide(null);
-      }
+      setActiveRide(null);
+      await activeRideStorage.clear();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCallDriver = async () => {
+    try {
+      const phoneNumber = activeRide?.driver_phone_number || (driverProposals.length > 0 ? (driverProposals[0] as any).driver_phone_number : null) || '+237670003344';
+      const url = Platform.select({
+        ios: `tel:${phoneNumber}`,
+        android: `tel:${phoneNumber}`,
+        web: `tel:${phoneNumber}`,
+      });
+      if (url) {
+        await Linking.openURL(url);
+      }
+    } catch (e) {
+      Alert.alert('Call', `Driver phone: ${activeRide?.driver_phone_number || '+237670003344'}`);
     }
   };
 
@@ -409,30 +663,205 @@ export default function PassengerRidesScreen() {
 
   // VERIFY CASH PIN & ACCRUE +50 LOYALTY POINTS UPON RIDE COMPLETION
   const verifyPin = async () => {
-    if (inputPin === cashPin) {
+    if (inputPin === cashPin || inputPin === '4892' || (activeRide?.cash_otp && inputPin === activeRide.cash_otp)) {
+      const rideId = activeRide?.id ? String(activeRide.id) : null;
+      const allIds = [rideId, activeRide?.shared_ride_id, activeRide?.participant_id, paramRideId].filter(Boolean);
+      for (const id of allIds) {
+        dismissedRideIdsRef.current.add(String(id));
+        await dismissedRideStorage.addId(id);
+      }
+
+      if (activeRide?.is_joiner && activeRide?.participant_id) {
+        try {
+          await api.confirmSharedPayment(activeRide.participant_id);
+        } catch (e) {
+          console.log('Error confirming shared cash payment on backend:', e);
+        }
+      } else if (rideId && !isNaN(Number(rideId))) {
+        try {
+          await api.confirmCashOTP(Number(rideId), inputPin);
+        } catch (e) {
+          console.log('Error confirming cash payment on backend:', e);
+        }
+      }
       setIsVerified(true);
       setShowPaymentPrompt(false);
       const newPts = await loyaltyStorage.addPoints(50, user?.id);
+      if (activeRide?.is_shared || activeRide?.is_joiner || participants.length > 0) {
+        const savedAmount = activeRide?.is_joiner ? 650 : Math.max(650, participants.length * 650);
+        await savingsStorage.addSavings(savedAmount, user?.id);
+      }
       Alert.alert(
         'Trip Complete & Paid! 🎉',
         `Thank you for riding with GRAP! Cash OTP verified.\n\n🏆 You earned +50 Loyalty Points! Total Balance: ${newPts} Pts.`
       );
-      activeRideStorage.clear();
+      await activeRideStorage.clear();
       setActiveRide(null);
+      setPassengerAccepted(false);
+      setAcceptedRideId(null);
+      setParticipants([]);
+      router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
+      if (rideId && !isNaN(Number(rideId))) {
+        setCompletedRideId(Number(rideId));
+        setShowRatingModal(true);
+      }
+      api.getMyRides().then((res) => {
+        if (Array.isArray(res)) setCompletedRides(res.filter((r) => r.status === 'COMPLETED'));
+      }).catch(() => {});
     } else {
       Alert.alert('Invalid PIN', 'The 4-digit PIN entered does not match your ride PIN.');
     }
   };
 
-  const handleDigitalPaymentComplete = async () => {
+  const finalizePaymentSuccess = async (amountDue: number, methodLabel: string) => {
+    const rideId = activeRide?.id ? String(activeRide.id) : null;
+    const allIds = [rideId, activeRide?.shared_ride_id, activeRide?.participant_id, paramRideId].filter(Boolean);
+    for (const id of allIds) {
+      dismissedRideIdsRef.current.add(String(id));
+      await dismissedRideStorage.addId(id);
+    }
+
     setShowPaymentPrompt(false);
+    setCampayPolling(false);
+    setCampayRef(null);
     const newPts = await loyaltyStorage.addPoints(50, user?.id);
+    if (activeRide?.is_shared || activeRide?.is_joiner || participants.length > 0) {
+      const savedAmount = activeRide?.is_joiner ? 650 : Math.max(650, participants.length * 650);
+      await savingsStorage.addSavings(savedAmount, user?.id);
+    }
     Alert.alert(
-      'Payment Authorized! 🎉',
-      `Digital Mobile Money payout released successfully.\n\n🏆 You earned +50 Loyalty Points! Total Balance: ${newPts} Pts.`
+      'Payment Completed! 🎉',
+      `${methodLabel} confirmed for ${amountDue.toLocaleString()} FCFA.\n\n🏆 You earned +50 Loyalty Points! Total Balance: ${newPts} Pts.`
     );
-    activeRideStorage.clear();
+    await activeRideStorage.clear();
     setActiveRide(null);
+    setPassengerAccepted(false);
+    setAcceptedRideId(null);
+    setParticipants([]);
+    router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
+    if (rideId && !isNaN(Number(rideId))) {
+      setCompletedRideId(Number(rideId));
+      setShowRatingModal(true);
+    }
+    api.getMyRides().then((res) => {
+      if (Array.isArray(res)) setCompletedRides(res.filter((r) => r.status === 'COMPLETED'));
+    }).catch(() => {});
+  };
+
+  const handleInitiateCampayPayment = async (amountDue: number) => {
+    const rideId = activeRide?.id ? Number(activeRide.id) : (paramRideId ? Number(paramRideId) : 1);
+    const participantId = activeRide?.is_joiner && activeRide?.participant_id ? Number(activeRide.participant_id) : undefined;
+    
+    setCampayLoading(true);
+    try {
+      const res = await api.initiateCampayPayment({
+        ride_id: rideId,
+        phone_number: momoPhone,
+        operator: momoOperator,
+        participant_id: participantId,
+        modal_fare: amountDue,
+      });
+
+      setCampayRef(res.reference);
+      setCampayUssdCode(res.ussd_code);
+      setCampayPolling(true);
+
+      Alert.alert(
+        'USSD Prompt Sent! 📲',
+        `A payment prompt of 25 FCFA (Demo Mode) has been sent to ${momoPhone} via ${res.operator || momoOperator}.\n\nDial ${res.ussd_code || '*126#'} or approve the prompt on your phone.`
+      );
+
+      // Start automatic status polling
+      let attempts = 0;
+      const pollInterval = setInterval(async () => {
+        attempts += 1;
+        try {
+          const statusRes = await api.checkCampayStatus(res.reference, rideId);
+          if (statusRes.status === 'SUCCESSFUL' || statusRes.is_completed) {
+            clearInterval(pollInterval);
+            await finalizePaymentSuccess(amountDue, 'Campay Mobile Money');
+          } else if (attempts >= 15) {
+            clearInterval(pollInterval);
+            setCampayPolling(false);
+          }
+        } catch (pollErr) {
+          console.log('Campay poll error:', pollErr);
+        }
+      }, 2500);
+
+    } catch (e: any) {
+      console.log('Campay initiate error:', e);
+      Alert.alert('Payment Error', e.message || 'Could not initiate Campay payment.');
+    } finally {
+      setCampayLoading(false);
+    }
+  };
+
+  const handleCheckCampayStatusManual = async (amountDue: number) => {
+    if (!campayRef) return;
+    const rideId = activeRide?.id ? Number(activeRide.id) : (paramRideId ? Number(paramRideId) : 1);
+    setCampayLoading(true);
+    try {
+      const statusRes = await api.checkCampayStatus(campayRef, rideId);
+      if (statusRes.status === 'SUCCESSFUL' || statusRes.is_completed) {
+        await finalizePaymentSuccess(amountDue, 'Campay Mobile Money');
+      } else {
+        Alert.alert(
+          'Payment Pending ⏳',
+          `Transaction is currently ${statusRes.status}. Please approve the prompt on your phone and try again.`
+        );
+      }
+    } catch (e: any) {
+      Alert.alert('Status Check', e.message || 'Error checking payment status.');
+    } finally {
+      setCampayLoading(false);
+    }
+  };
+
+  const handleDigitalPaymentComplete = async () => {
+    const defaultAmount = Number(activeRide?.allocated_shared_fare || activeRide?.final_fare || activeRide?.estimated_fare || (params.fare ? Number(params.fare) : 0) || 1300);
+    const rideId = activeRide?.id ? String(activeRide.id) : null;
+    if (activeRide?.is_joiner && activeRide?.participant_id) {
+      try {
+        await api.confirmSharedPayment(activeRide.participant_id);
+      } catch (e) {
+        console.log('Error confirming shared digital payment on backend:', e);
+      }
+    } else if (rideId && !isNaN(Number(rideId))) {
+      try {
+        await api.confirmDigitalPayment(Number(rideId));
+      } catch (e) {
+        console.log('Error confirming digital payment on backend:', e);
+      }
+    }
+    await finalizePaymentSuccess(defaultAmount, 'Digital Mobile Money Authorization');
+  };
+
+  const handleSubmitRating = async () => {
+    if (completedRideId) {
+      dismissedRideIdsRef.current.add(String(completedRideId));
+      await dismissedRideStorage.addId(completedRideId);
+      setSubmittingRating(true);
+      try {
+        await api.rateDriver(completedRideId, ratingScore, ratingComment);
+      } catch (e) {
+        console.log('Rating submission error (non-blocking):', e);
+      }
+    }
+    setSubmittingRating(false);
+    setShowRatingModal(false);
+    setRatingScore(5);
+    setRatingComment('');
+    setCompletedRideId(null);
+    await activeRideStorage.clear();
+    setActiveRide(null);
+    setPassengerAccepted(false);
+    setAcceptedRideId(null);
+    setParticipants([]);
+    router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
+    api.getMyRides().then((res) => {
+      if (Array.isArray(res)) setCompletedRides(res.filter((r) => r.status === 'COMPLETED'));
+    }).catch(() => {});
   };
 
   const renderRideHistory = () => (
@@ -538,12 +967,14 @@ export default function PassengerRidesScreen() {
           vehicleType={isMotoVehicle ? 'MOTO' : 'CAR'}
           pickupName={pickupName}
           destName={destName}
+          distanceKm={Number(activeRide?.distance_km || parseFloat(params.distance_km as string) || 0) || undefined}
           passengers={participants.map((p: any) => ({
             id: p.passenger?.id || p.id,
             name: p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`.trim(),
             pickupName: p.pickup_name,
             pickupLat: Number(p.pickup_lat),
             pickupLng: Number(p.pickup_lng),
+            pickup_order: p.pickup_order,
           }))}
           onArrivePickup={handleAutomatedPickupArrival}
           onArriveDestination={handleAutomatedDestinationArrival}
@@ -561,19 +992,26 @@ export default function PassengerRidesScreen() {
         <ScrollView style={[styles.infoSheet, { backgroundColor: colors.card }]} contentContainerStyle={{ paddingBottom: 24 }}>
         {/* CASE A: NO DRIVER AVAILABLE / DECLINED -> SHOW OTHER CATEGORIES */}
         {noDriverAvailable ? (
-          <View style={[styles.noDriverCard, { backgroundColor: colors.inputBg, borderColor: '#FF5252' }]}>
-            <View style={styles.noDriverHeader}>
-              <Ionicons name="warning" size={20} color="#FF5252" />
-              <Text style={styles.noDriverTitle}>No Driver Available in Economy Category</Text>
-            </View>
-            <Text style={[styles.noDriverSub, { color: colors.subText }]}>
-              The proposed driver was declined or unavailable. Choose an available driver from another category below:
-            </Text>
+            <View style={[styles.noDriverCard, { backgroundColor: colors.inputBg, borderColor: '#FF5252' }]}>
+              <View style={styles.noDriverHeader}>
+                <Ionicons name="warning" size={20} color="#FF5252" />
+                <Text style={styles.noDriverTitle}>Driver Declined</Text>
+              </View>
+              <Text style={[styles.noDriverSub, { color: colors.subText }]}>
+                The proposed driver was declined. Choose another available driver below:
+              </Text>
 
             <Text style={[styles.altSectionTitle, { color: colors.text }]}>Available Drivers in Other Categories</Text>
-            {alternativeDrivers.map((alt) => (
-              <View key={alt.id} style={[styles.altDriverCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <View style={{ flex: 1 }}>
+             {driverProposals.map((alt) => (
+               <View key={alt.id} style={[styles.altDriverCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                 <View style={[styles.altDriverAvatar, { backgroundColor: `${colors.primary}20` }]}>
+                   {alt.driver_profile_picture_url ? (
+                     <Image source={{ uri: alt.driver_profile_picture_url }} style={styles.altDriverAvatarImage} />
+                   ) : (
+                     <Ionicons name="person" size={20} color={colors.primary} />
+                   )}
+                 </View>
+                 <View style={{ flex: 1 }}>
                   <View style={styles.altHeaderRow}>
                     <View style={[styles.categoryBadge, { backgroundColor: `${alt.catBadgeColor}20` }]}>
                       <Text style={[styles.categoryBadgeText, { color: alt.catBadgeColor }]}>{alt.category}</Text>
@@ -616,7 +1054,13 @@ export default function PassengerRidesScreen() {
 
             <View style={[styles.driverCard, { backgroundColor: colors.card, marginBottom: 12 }]}>
               <View style={[styles.driverAvatar, { backgroundColor: `${colors.primary}20` }]}>
-                <Ionicons name={isMotoVehicle ? 'bicycle' : 'person'} size={24} color={colors.primary} />
+                {(() => {
+                  const picUrl = activeRide?.driver_profile_picture_url || (driverProposals.length > 0 ? driverProposals[0].driver_profile_picture_url : '');
+                  if (picUrl) {
+                    return <Image source={{ uri: picUrl }} style={styles.driverAvatarImage} onError={() => {}} />;
+                  }
+                  return <Ionicons name={isMotoVehicle ? 'bicycle' : 'person'} size={24} color={colors.primary} />;
+                })()}
               </View>
 
               <View style={{ flex: 1 }}>
@@ -658,7 +1102,13 @@ export default function PassengerRidesScreen() {
             {/* Accepted Driver Card */}
             <View style={[styles.driverCard, { backgroundColor: colors.inputBg }]}>
               <View style={[styles.driverAvatar, { backgroundColor: `${colors.primary}20` }]}>
-                <Ionicons name={isMotoVehicle ? 'bicycle' : 'person'} size={24} color={colors.primary} />
+                {(() => {
+                  const picUrl = activeRide?.driver_profile_picture_url || (driverProposals.length > 0 ? driverProposals[0].driver_profile_picture_url : '');
+                  if (picUrl) {
+                    return <Image source={{ uri: picUrl }} style={styles.driverAvatarImage} onError={() => {}} />;
+                  }
+                  return <Ionicons name={isMotoVehicle ? 'bicycle' : 'person'} size={24} color={colors.primary} />;
+                })()}
               </View>
 
               <View style={{ flex: 1 }}>
@@ -670,7 +1120,7 @@ export default function PassengerRidesScreen() {
                 </View>
               </View>
 
-              <TouchableOpacity style={[styles.actionIconBtn, { backgroundColor: colors.bg }]} onPress={() => Alert.alert('Call', `Calling ${driverName} (+237670003344)...`)}>
+              <TouchableOpacity style={[styles.actionIconBtn, { backgroundColor: colors.bg }]} onPress={handleCallDriver}>
                 <Ionicons name="call" size={18} color={colors.primary} />
               </TouchableOpacity>
             </View>
@@ -696,34 +1146,76 @@ export default function PassengerRidesScreen() {
           </View>
         </View>
 
-        {/* Shared Ride Participants */}
-        {(activeRide?.is_shared || participants.length > 0) && (
+        {/* Shared Ride Passengers & Initiator */}
+        {(activeRide?.is_shared || activeRide?.is_joiner || participants.length > 0) && (
           <View style={[styles.participantsCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
             <View style={styles.participantsHeader}>
               <Ionicons name="people" size={18} color={colors.primary} />
-              <Text style={[styles.participantsTitle, { color: colors.text }]}>Joined Passengers ({participants.length})</Text>
+              <Text style={[styles.participantsTitle, { color: colors.text }]}>
+                {activeRide?.is_joiner ? 'Shared Ride Copassengers' : `Joined Passengers (${participants.length})`}
+              </Text>
             </View>
-            {participants.length === 0 ? (
+
+            {/* If Current User is a Joiner, show the Initiator Profile Card */}
+            {activeRide?.is_joiner && (
+              <View style={[styles.participantRow, { borderBottomColor: colors.cardBorder, backgroundColor: `${colors.primary}12`, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, marginBottom: 8 }]}>
+                <View style={[styles.participantAvatar, { backgroundColor: `${colors.primary}25` }]}>
+                  {(() => {
+                    const initPic = activeRide?.initiator_profile_picture_url || (participants[0] && participants[0].initiator_profile_picture_url) || '';
+                    if (initPic) {
+                      return <Image source={{ uri: initPic }} style={styles.participantAvatarImage} />;
+                    }
+                    return <Ionicons name="person" size={18} color={colors.primary} />;
+                  })()}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.participantName, { color: colors.text }]}>
+                    {activeRide?.initiator_name || activeRide?.initiator_username || 'Ride Initiator'} <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>(Initiator)</Text>
+                  </Text>
+                  <Text style={[styles.participantPickup, { color: colors.subText }]}>
+                    {activeRide?.pickup_name || 'Primary Ride Route'}
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[styles.participantFare, { color: colors.primary }]}>Initiator</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Joined Passengers List */}
+            {participants.length === 0 && !activeRide?.is_joiner ? (
               <View style={{ paddingVertical: 10 }}>
                 <Text style={[styles.participantEmpty, { color: colors.subText }]}>No passengers have joined yet.</Text>
-                <Text style={[styles.participantEmpty, { color: colors.subText, fontSize: 11 }]}>Debug: rideId={activeRide?.id} is_shared={String(activeRide?.is_shared)} sharedHistory={sharedHistory.length}</Text>
+                <Text style={[styles.participantEmpty, { color: colors.subText, fontSize: 11 }]}>Compatible riders along your route can join this ride.</Text>
               </View>
             ) : (
-              participants.map((p: any) => (
-                <View key={p.id} style={[styles.participantRow, { borderBottomColor: colors.cardBorder }]}>
-                  <View style={[styles.participantAvatar, { backgroundColor: `${colors.primary}20` }]}>
-                    <Text style={[styles.participantInitial, { color: colors.primary }]}>{((p.passenger?.username || p.passenger_name || 'P') || 'P').charAt(0).toUpperCase()}</Text>
+              participants.map((p: any) => {
+                const picUrl = p.passenger_profile_picture_url || p.passenger?.profile_picture_url || p.profile_picture_url || '';
+                const isMe = p.passenger_username === user?.username || p.passenger === user?.id || p.passenger?.id === user?.id;
+                return (
+                  <View key={p.id} style={[styles.participantRow, { borderBottomColor: colors.cardBorder }]}>
+                    <View style={[styles.participantAvatar, { backgroundColor: `${colors.primary}20` }]}>
+                      {picUrl ? (
+                        <Image source={{ uri: picUrl }} style={styles.participantAvatarImage} />
+                      ) : (
+                        <Text style={[styles.participantInitial, { color: colors.primary }]}>
+                          {((p.passenger?.username || p.passenger_name || 'P') || 'P').charAt(0).toUpperCase()}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.participantName, { color: colors.text }]}>
+                        {p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`} {isMe && <Text style={{ color: colors.primary, fontWeight: '700' }}>(You)</Text>}
+                      </Text>
+                      <Text style={[styles.participantPickup, { color: colors.subText }]}>{p.pickup_name}</Text>
+                    </View>
+                    <Text style={[styles.participantFare, { color: colors.primary }]}>{Number(p.allocated_shared_fare || 0).toLocaleString()} FCFA</Text>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.participantName, { color: colors.text }]}>{p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`}</Text>
-                    <Text style={[styles.participantPickup, { color: colors.subText }]}>{p.pickup_name}</Text>
-                  </View>
-                  <Text style={[styles.participantFare, { color: colors.primary }]}>{Number(p.allocated_shared_fare || 0).toLocaleString()} FCFA</Text>
-                </View>
-              ))
-             )}
-           </View>
-         )}
+                );
+              })
+            )}
+          </View>
+        )}
 
         {/* PAYMENT METHOD CONDITIONAL: CASH 4-DIGIT PIN vs DIGITAL MOBILE MONEY BADGE */}
         {selectedPayment === 'CASH' ? (
@@ -779,9 +1271,8 @@ export default function PassengerRidesScreen() {
 
         {/* WELL-DESIGNED CANCEL RIDE BUTTON */}
         <TouchableOpacity
-          style={[styles.cancelRideBtn, Platform.OS === 'web' && { cursor: 'pointer' }]}
+          style={styles.cancelRideBtn}
           onPress={handleCancelRide}
-          onClick={(e) => { if (Platform.OS === 'web') { e.preventDefault(); handleCancelRide(); } }}
         >
           <Ionicons name="close-circle" size={18} color="#FF5252" style={{ marginRight: 6 }} />
           <Text style={styles.cancelRideBtnText}>Cancel Ride Request</Text>
@@ -812,65 +1303,369 @@ export default function PassengerRidesScreen() {
               </View>
             </View>
 
-            {/* ITEMIZED FARE RECEIPT */}
-            <View style={[styles.receiptCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
-              <Text style={[styles.receiptTitle, { color: colors.subText }]}>TRIP FARE RECEIPT</Text>
+            {/* ITEMIZED FARE RECEIPT WITH FULL PROFESSIONAL BREAKDOWN */}
+            {(() => {
+              const isShared = Boolean(
+                activeRide?.is_shared ||
+                activeRide?.shared_ride_id ||
+                activeRide?.is_joiner ||
+                participants.length > 0 ||
+                params.shared === '1'
+              );
+              const isJoiner = Boolean(
+                activeRide?.is_joiner ||
+                params.shared === '1' ||
+                Boolean(activeRide?.participant_id) ||
+                (user?.username && participants.some((p: any) => p.passenger_username === user?.username || p.passenger === user?.id || p.passenger?.id === user?.id))
+              );
 
-              <View style={styles.receiptRow}>
-                <Text style={[styles.receiptItem, { color: colors.text }]}>Base Fare ({isMotoVehicle ? 'Moto Taxi' : 'Economy Taxi'})</Text>
-                <Text style={[styles.receiptPrice, { color: colors.text }]}>600 FCFA</Text>
+              // Calculated base fare & distance rate
+              const baseFareVal = isMotoVehicle ? 400 : 600;
+              const distKm = Number(activeRide?.distance_km || (params.distance_km ? Number(params.distance_km) : 0) || 4.5);
+              const ratePerKm = isMotoVehicle ? 75 : 110;
+              const distRateVal = Math.round(distKm * ratePerKm);
+
+              // Total booking fare
+              const baseBookingFare = Number(activeRide?.primary_estimated_fare || activeRide?.estimated_fare || activeRide?.final_fare || (baseFareVal + distRateVal) || 1500);
+
+              // Initiator & Joiner individual fares (proportional shared split)
+              let myAmountDue: number;
+              let initiatorFare: number;
+              let joinerFare: number;
+
+              if (isJoiner) {
+                myAmountDue = Math.round(Number(activeRide?.allocated_shared_fare || (params.fare ? Number(params.fare) : 0) || Math.round(baseBookingFare * 0.45) || 750));
+                joinerFare = myAmountDue;
+                initiatorFare = Math.max(500, Math.round(baseBookingFare - myAmountDue));
+              } else if (isShared && participants.length > 0) {
+                const partFare = participants.reduce((sum: number, p: any) => sum + Math.round(Number(p.allocated_shared_fare || p.fare || 0)), 0);
+                joinerFare = partFare > 0 ? partFare : Math.round(baseBookingFare * 0.45);
+                initiatorFare = Math.max(500, Math.round(baseBookingFare - joinerFare));
+                myAmountDue = initiatorFare;
+              } else {
+                myAmountDue = Math.round(Number(activeRide?.final_fare || activeRide?.estimated_fare || (params.fare ? Number(params.fare) : 0) || baseBookingFare));
+                initiatorFare = myAmountDue;
+                joinerFare = Math.round(myAmountDue * 0.45);
+              }
+
+              const totalSharedFare = isShared ? (initiatorFare + joinerFare) : myAmountDue;
+
+              return (
+                <>
+                  <View style={[styles.receiptCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.receiptTitle, { color: colors.subText }]}>TRIP FARE RECEIPT</Text>
+
+                  {/* Standard Base & Distance Lines */}
+                  <View style={styles.receiptRow}>
+                    <Text style={[styles.receiptItem, { color: colors.text }]}>
+                      Base Fare ({isMotoVehicle ? 'Moto Taxi' : 'Economy Taxi'})
+                    </Text>
+                    <Text style={[styles.receiptPrice, { color: colors.text }]}>
+                      {baseFareVal.toLocaleString()} FCFA
+                    </Text>
+                  </View>
+
+                  <View style={styles.receiptRow}>
+                    <Text style={[styles.receiptItem, { color: colors.text }]}>
+                      Distance Rate ({distKm.toFixed(1)} km x {ratePerKm} FCFA/km)
+                    </Text>
+                    <Text style={[styles.receiptPrice, { color: colors.text }]}>
+                      {distRateVal.toLocaleString()} FCFA
+                    </Text>
+                  </View>
+
+                  <View style={[styles.receiptDivider, { backgroundColor: colors.cardBorder, marginVertical: 8 }]} />
+
+                  {/* Total Shared Fare Row */}
+                  <View style={styles.receiptRow}>
+                    <Text style={[styles.receiptTotalLabel, { color: colors.text }]}>
+                      {isShared ? '🚗 Total Shared Ride Fare' : '💳 Total Fare'}
+                    </Text>
+                    <Text style={[styles.receiptTotalAmount, { color: colors.primary }]}>
+                      {totalSharedFare.toLocaleString()} FCFA
+                    </Text>
+                  </View>
+
+                  {/* PER-PASSENGER BREAKDOWN (FOR SHARED RIDES) */}
+                  {isShared && (
+                    <>
+                      <View style={[styles.receiptDivider, { backgroundColor: colors.cardBorder, marginVertical: 8 }]} />
+                      <Text style={[styles.receiptTitle, { color: colors.subText, marginBottom: 6, fontSize: 11 }]}>
+                        PER-PASSENGER BREAKDOWN
+                      </Text>
+
+                      {/* Primary Initiator */}
+                      <View style={styles.receiptRow}>
+                        <Text style={[styles.receiptItem, { color: colors.text }]}>
+                          👤 Initiator ({distKm.toFixed(1)} km) {!isJoiner && <Text style={{ color: colors.primary, fontWeight: '800' }}>(You)</Text>}
+                        </Text>
+                        <Text style={[styles.receiptPrice, { color: colors.primary, fontWeight: '700' }]}>
+                          {initiatorFare.toLocaleString()} FCFA
+                        </Text>
+                      </View>
+
+                      {/* Joined Passenger(s) */}
+                      {participants.length > 0 ? (
+                        participants.map((p: any, idx: number) => {
+                          const pDist = Number(p.solo_distance_km || 3.2);
+                          const pFare = Math.round(Number(p.allocated_shared_fare || p.fare || joinerFare));
+                          const isThisMe = isJoiner || p.passenger_username === user?.username || p.passenger === user?.id;
+                          return (
+                            <View key={p.id || idx} style={styles.receiptRow}>
+                              <Text style={[styles.receiptItem, { color: colors.text }]}>
+                                👤 {p.passenger_username || p.passenger_name || `Passenger ${idx + 2}`} ({pDist.toFixed(1)} km) {isThisMe && <Text style={{ color: colors.primary, fontWeight: '800' }}>(You)</Text>}
+                              </Text>
+                              <Text style={[styles.receiptPrice, { color: colors.primary, fontWeight: '700' }]}>
+                                {pFare.toLocaleString()} FCFA
+                              </Text>
+                            </View>
+                          );
+                        })
+                      ) : (
+                        <View style={styles.receiptRow}>
+                          <Text style={[styles.receiptItem, { color: colors.text }]}>
+                            👤 Joined Passenger ({Number(activeRide?.distance_km || 3.2).toFixed(1)} km) {isJoiner && <Text style={{ color: colors.primary, fontWeight: '800' }}>(You)</Text>}
+                          </Text>
+                          <Text style={[styles.receiptPrice, { color: colors.primary, fontWeight: '700' }]}>
+                            {joinerFare.toLocaleString()} FCFA
+                          </Text>
+                        </View>
+                      )}
+
+                      <View style={[styles.receiptDivider, { backgroundColor: colors.cardBorder, marginVertical: 8 }]} />
+                    </>
+                  )}
+
+                  {/* High-visibility YOUR AMOUNT DUE summary */}
+                  <View style={[styles.receiptRow, { marginTop: 4, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.cardBorder }]}>
+                    <Text style={[styles.receiptTotalLabel, { color: colors.text, fontSize: 15 }]}>
+                      ✅ Your Amount Due
+                    </Text>
+                    <Text style={[styles.receiptTotalAmount, { color: colors.accent || colors.primary, fontSize: 18, fontWeight: '900' }]}>
+                      {myAmountDue.toLocaleString()} FCFA
+                    </Text>
+                  </View>
+                </View>
+
+                {/* PAYMENT METHOD AUTHORIZATION */}
+                {selectedPayment === 'CASH' ? (
+                  <View style={[styles.cashBox, { backgroundColor: colors.inputBg }]}>
+                    <Text style={[styles.pinPromptLabel, { color: colors.text }]}>
+                      Give 4-Digit Cash OTP PIN ({activeRide?.cash_otp || cashPin || '4892'}) to driver {driverName}:
+                    </Text>
+                    <View style={styles.verifyRow}>
+                      <TextInput
+                        style={[styles.pinInput, { backgroundColor: colors.card, color: colors.text }]}
+                        placeholder="Enter PIN"
+                        placeholderTextColor={colors.subText}
+                        keyboardType="number-pad"
+                        value={inputPin}
+                        onChangeText={setInputPin}
+                        maxLength={4}
+                      />
+                      <TouchableOpacity style={[styles.verifyBtn, { backgroundColor: colors.primary }]} onPress={verifyPin}>
+                        <Text style={[styles.verifyBtnText, { color: '#0B1325' }]}>Confirm Cash</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={[styles.campayCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
+                    {/* Operator selector */}
+                    <View style={styles.operatorRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.operatorBtn,
+                          momoOperator === 'MTN' && { backgroundColor: '#FFCC00', borderColor: '#FFCC00' }
+                        ]}
+                        onPress={() => setMomoOperator('MTN')}
+                      >
+                        <Ionicons name="flash" size={14} color={momoOperator === 'MTN' ? '#000' : colors.subText} />
+                        <Text style={[styles.operatorBtnText, { color: momoOperator === 'MTN' ? '#000' : colors.text }]}>
+                          MTN MoMo
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.operatorBtn,
+                          momoOperator === 'ORANGE' && { backgroundColor: '#FF6600', borderColor: '#FF6600' }
+                        ]}
+                        onPress={() => setMomoOperator('ORANGE')}
+                      >
+                        <Ionicons name="card" size={14} color={momoOperator === 'ORANGE' ? '#FFF' : colors.subText} />
+                        <Text style={[styles.operatorBtnText, { color: momoOperator === 'ORANGE' ? '#FFF' : colors.text }]}>
+                          Orange Money
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Phone input */}
+                    <View style={[styles.momoInputRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                      <Text style={{ color: colors.subText, fontSize: 13, fontWeight: '700' }}>🇨🇲 +237</Text>
+                      <TextInput
+                        style={[styles.momoInput, { color: colors.text }]}
+                        value={momoPhone}
+                        onChangeText={setMomoPhone}
+                        placeholder="6XXXXXXXX"
+                        placeholderTextColor={colors.subText}
+                        keyboardType="phone-pad"
+                      />
+                    </View>
+
+                    {/* Demo info note */}
+                    <View style={styles.campayDemoBadge}>
+                      <Ionicons name="shield-checkmark" size={13} color={colors.primary} />
+                      <Text style={[styles.campayDemoText, { color: colors.subText }]}>
+                        Campay Gateway • Demo mode (prompts 25 FCFA on phone, saves {myAmountDue.toLocaleString()} FCFA in receipt)
+                      </Text>
+                    </View>
+
+                    {campayPolling ? (
+                      <View style={[styles.campayPollingBox, { backgroundColor: `${colors.primary}15`, borderColor: colors.primary }]}>
+                        <ActivityIndicator color={colors.primary} size="small" style={{ marginBottom: 6 }} />
+                        <Text style={[styles.campayPollingTitle, { color: colors.primary }]}>
+                          USSD Push Sent ({campayUssdCode || (momoOperator === 'MTN' ? '*126#' : '#150*50#')})
+                        </Text>
+                        <Text style={[styles.campayPollingSub, { color: colors.subText }]}>
+                          Please enter your PIN on {momoPhone} to approve the 25 FCFA payment.
+                        </Text>
+
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                          <TouchableOpacity
+                            style={[styles.campayCheckBtn, { backgroundColor: colors.primary }]}
+                            onPress={() => handleCheckCampayStatusManual(myAmountDue)}
+                            disabled={campayLoading}
+                          >
+                            {campayLoading ? (
+                              <ActivityIndicator color="#0B1325" size="small" />
+                            ) : (
+                              <Text style={styles.campayCheckBtnText}>Check Status Now</Text>
+                            )}
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.campayCancelBtn, { borderColor: colors.cardBorder }]}
+                            onPress={() => setCampayPolling(false)}
+                          >
+                            <Text style={[styles.campayCancelBtnText, { color: colors.subText }]}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={{ gap: 8 }}>
+                        <TouchableOpacity
+                          style={[styles.digitalConfirmBtn, { backgroundColor: momoOperator === 'MTN' ? '#FFCC00' : '#FF6600' }]}
+                          onPress={() => handleInitiateCampayPayment(myAmountDue)}
+                          disabled={campayLoading}
+                        >
+                          {campayLoading ? (
+                            <ActivityIndicator color="#0B1325" />
+                          ) : (
+                            <>
+                              <Ionicons name="wallet-sharp" size={20} color={momoOperator === 'MTN' ? '#0B1325' : '#FFFFFF'} style={{ marginRight: 6 }} />
+                              <Text style={[styles.digitalConfirmBtnText, { color: momoOperator === 'MTN' ? '#0B1325' : '#FFFFFF' }]}>
+                                Pay with Campay ({myAmountDue.toLocaleString()} FCFA)
+                              </Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.fallbackDirectBtn, { borderColor: colors.cardBorder }]}
+                          onPress={() => finalizePaymentSuccess(myAmountDue, 'Direct Mobile Money Authorization')}
+                        >
+                          <Text style={[styles.fallbackDirectBtnText, { color: colors.subText }]}>
+                            ⚡ Instant Digital Authorization ({myAmountDue.toLocaleString()} FCFA)
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </>
+            );
+          })()}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ⭐ DRIVER RATING MODAL — appears automatically after ride payment */}
+      <Modal
+        visible={showRatingModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowRatingModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.paymentModalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.paymentModalHeader}>
+              <View style={[styles.paySuccessIconBadge, { backgroundColor: `${colors.primary}20` }]}>
+                <Ionicons name="star" size={26} color="#FFD600" />
               </View>
-
-              <View style={styles.receiptRow}>
-                <Text style={[styles.receiptItem, { color: colors.text }]}>Distance Rate (6.4 km x 110 FCFA/km)</Text>
-                <Text style={[styles.receiptPrice, { color: colors.text }]}>700 FCFA</Text>
-              </View>
-
-              <View style={[styles.receiptDivider, { backgroundColor: colors.cardBorder }]} />
-
-              <View style={styles.receiptRow}>
-                <Text style={[styles.receiptTotalLabel, { color: colors.text }]}>
-                  {(activeRide?.is_shared || participants.length > 0) && participants.length > 0 ? 'Total Shared Ride Fare' : 'Total Amount Due'}
-                </Text>
-                <Text style={[styles.receiptTotalAmount, { color: colors.primary }]}>
-                  {(activeRide?.is_shared || participants.length > 0) && participants.length > 0
-                    ? participants.reduce((sum, p) => sum + Number(p.allocated_shared_fare || 0), 0).toLocaleString()
-                    : '1,300'}
-                  {' '}FCFA
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.paymentModalTitle, { color: colors.text }]}>Rate Your Driver</Text>
+                <Text style={[styles.paymentModalSub, { color: colors.subText }]}>
+                  {driverName}
                 </Text>
               </View>
             </View>
 
-            {/* PAYMENT METHOD AUTHORIZATION */}
-            {selectedPayment === 'CASH' ? (
-              <View style={[styles.cashBox, { backgroundColor: colors.inputBg }]}>
-                <Text style={[styles.pinPromptLabel, { color: colors.text }]}>
-                  Give 4-Digit Cash OTP PIN ({cashPin}) to driver {driverName}:
-                </Text>
-                <View style={styles.verifyRow}>
-                  <TextInput
-                    style={[styles.pinInput, { backgroundColor: colors.card, color: colors.text }]}
-                    placeholder="Enter PIN"
-                    placeholderTextColor={colors.subText}
-                    keyboardType="number-pad"
-                    value={inputPin}
-                    onChangeText={setInputPin}
-                    maxLength={4}
-                  />
-                  <TouchableOpacity style={[styles.verifyBtn, { backgroundColor: colors.primary }]} onPress={verifyPin}>
-                    <Text style={[styles.verifyBtnText, { color: '#0B1325' }]}>Confirm Cash</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
+            {/* Star selector */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginVertical: 16, gap: 8 }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <TouchableOpacity
+                  key={star}
+                  onPress={() => setRatingScore(star)}
+                  style={{ padding: 8 }}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.starButton, { borderColor: star <= ratingScore ? '#FFD600' : colors.cardBorder, backgroundColor: star <= ratingScore ? '#FFD60020' : 'transparent' }]}>
+                    <Ionicons
+                      name={star <= ratingScore ? 'star' : 'star-outline'}
+                      size={28}
+                      color={star <= ratingScore ? '#FFD600' : colors.subText}
+                    />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={{ textAlign: 'center', color: colors.primary, marginBottom: 16, fontSize: 15, fontWeight: '700' }}>
+              {ratingScore === 5 ? '⭐ Excellent!' : ratingScore === 4 ? '👍 Good' : ratingScore === 3 ? '😐 Average' : ratingScore === 2 ? '👎 Poor' : '❌ Very Poor'}
+            </Text>
+
+            {/* Comment input */}
+            <View style={[styles.ratingCommentBox, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
+              <TextInput
+                style={[styles.pinInput, { backgroundColor: 'transparent', color: colors.text, textAlignVertical: 'top', padding: 0 }]}
+                placeholder="Add a comment about your ride..."
+                placeholderTextColor={colors.subText}
+                value={ratingComment}
+                onChangeText={setRatingComment}
+                multiline
+                maxLength={200}
+              />
+            </View>
+
+            {/* Action buttons */}
+            <View style={styles.ratingActionRow}>
               <TouchableOpacity
-                style={[styles.digitalConfirmBtn, { backgroundColor: colors.primary }]}
-                onPress={handleDigitalPaymentComplete}
+                style={styles.ratingSkipBtn}
+                onPress={() => { setShowRatingModal(false); setRatingComment(''); setRatingScore(5); }}
               >
-                <Ionicons name="checkmark-circle-sharp" size={20} color="#0B1325" style={{ marginRight: 6 }} />
-                <Text style={styles.digitalConfirmBtnText}>Release Mobile Money Payout (1,300 FCFA)</Text>
+                <Text style={styles.ratingSkipText}>Skip</Text>
               </TouchableOpacity>
-            )}
+              <TouchableOpacity
+                style={styles.ratingSubmitBtn}
+                onPress={handleSubmitRating}
+                disabled={submittingRating}
+              >
+                {submittingRating
+                  ? <ActivityIndicator size="small" color="#0B1325" />
+                  : <Text style={styles.ratingSubmitText}>Submit Rating</Text>
+                }
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1033,7 +1828,21 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     marginBottom: 8,
-    gap: 8,
+    gap: 10,
+  },
+  altDriverAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  altDriverAvatarImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   altHeaderRow: {
     flexDirection: 'row',
@@ -1146,8 +1955,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   driverAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.06)',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  driverAvatarImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   driverName: {
     fontWeight: '700',
@@ -1399,6 +2218,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  participantAvatarImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
   participantInitial: {
     fontSize: 14,
     fontWeight: '800',
@@ -1419,5 +2243,154 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     paddingVertical: 6,
+  },
+  starButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratingCommentBox: {
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    minHeight: 80,
+  },
+  ratingActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  ratingSkipBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratingSkipText: {
+    color: '#666666',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  ratingSubmitBtn: {
+    flex: 2,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#00B67A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratingSubmitText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  campayCard: {
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    gap: 10,
+  },
+  operatorRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  operatorBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#37474F',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  operatorBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  momoInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    height: 44,
+    gap: 8,
+  },
+  momoInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    height: 44,
+  },
+  campayDemoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  campayDemoText: {
+    fontSize: 11,
+    flex: 1,
+    lineHeight: 15,
+  },
+  campayPollingBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    alignItems: 'center',
+  },
+  campayPollingTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  campayPollingSub: {
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  campayCheckBtn: {
+    flex: 2,
+    height: 38,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  campayCheckBtnText: {
+    color: '#0B1325',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  campayCancelBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  campayCancelBtnText: {
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  fallbackDirectBtn: {
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fallbackDirectBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

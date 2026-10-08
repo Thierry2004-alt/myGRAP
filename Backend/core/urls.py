@@ -6,10 +6,11 @@ from core.views import (
     RideCategoryListView, EstimateFareView, RequestRideView,
     PassengerMyRidesView, CancelRideView,
     SearchSharedRidesView, JoinSharedRideView, SharedRideStatusView, MySharedRidesView, ConfirmSharedPaymentView, MakeRideShareableView,
-    ConfirmCashPaymentView, DriverStatusView, DriverRideFeedView,
+    ConfirmCashPaymentView, ConfirmDigitalPaymentView, RateDriverView, DriverStatusView, DriverRideFeedView,
+    InitiateCampayPaymentView, CheckCampayPaymentStatusView,
     DriverAcceptRideView, DriverUpdateRideStatusView, DriverEarningsView,
     WithdrawalRequestView, DriverAIDemandRecommendationsView,
-    AdminDriverVerificationView, AdminVehicleVerificationView, AdminSystemMetricsView
+    AdminDriverVerificationView, AdminVehicleVerificationView, AdminSystemMetricsView, DriverProposalsView
 )
 
 urlpatterns = [
@@ -37,8 +38,12 @@ urlpatterns = [
     path('rides/shared/participant/<int:participant_id>/confirm-payment/', ConfirmSharedPaymentView.as_view(), name='confirm_shared_payment'),
     path('rides/shared/make-shareable/', MakeRideShareableView.as_view(), name='make_ride_shareable'),
 
-    # Payments
+    # Payments & Campay Mobile Money Gateway
     path('rides/confirm-cash-otp/', ConfirmCashPaymentView.as_view(), name='confirm_cash_otp'),
+    path('rides/confirm-digital-payment/', ConfirmDigitalPaymentView.as_view(), name='confirm_digital_payment'),
+    path('rides/campay/initiate/', InitiateCampayPaymentView.as_view(), name='initiate_campay_payment'),
+    path('rides/campay/status/<str:reference>/', CheckCampayPaymentStatusView.as_view(), name='check_campay_status'),
+    path('rides/rate-driver/', RateDriverView.as_view(), name='rate_driver'),
 
     # Driver Actions
     path('driver/status/', DriverStatusView.as_view(), name='driver_status'),
@@ -55,4 +60,5 @@ urlpatterns = [
     path('admin/drivers/', AdminDriverVerificationView.as_view(), name='admin_drivers'),
     path('admin/vehicles/', AdminVehicleVerificationView.as_view(), name='admin_vehicles'),
     path('admin/metrics/', AdminSystemMetricsView.as_view(), name='admin_metrics'),
+    path('driver/proposals/', DriverProposalsView.as_view(), name='driver_proposals'),
 ]

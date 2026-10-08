@@ -147,7 +147,6 @@ export default function PassengerHomeScreen() {
 
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.BestForNavigation,
-        timeout: 10000,
       });
       await applyPosition(position.coords.latitude, position.coords.longitude);
     } catch (error) {
@@ -209,7 +208,14 @@ export default function PassengerHomeScreen() {
 
       const fareMap: { [catId: number]: number } = {};
       allCats.forEach((cat) => {
-        fareMap[cat.id] = calculateMultiFactorCategoryFare(validDist, cat.code);
+        fareMap[cat.id] = calculateMultiFactorCategoryFare(
+          validDist,
+          cat.code,
+          undefined,
+          'CLEAR',
+          Number(cat.base_fare),
+          Number(cat.rate_per_km)
+        );
       });
 
       setCategoryFares(fareMap);
@@ -273,6 +279,10 @@ export default function PassengerHomeScreen() {
       });
 
       const rideId = ride?.id || Math.floor(Math.random() * 1000) + 1;
+      const backendFare = ride?.estimated_fare ? Number(ride.estimated_fare) : (estimatedFare || 1300);
+      if (ride?.estimated_fare) {
+        setEstimatedFare(backendFare);
+      }
 
       if (rideMode === 'SHARED') {
         await api.makeRideShareable(rideId);
@@ -283,7 +293,7 @@ export default function PassengerHomeScreen() {
         pay: paymentMethod,
         pickup: pickupName,
         dest: destName,
-        fare: String(estimatedFare || 1300),
+        fare: String(backendFare),
       };
 
       if (Platform.OS === 'web') {
@@ -308,6 +318,26 @@ export default function PassengerHomeScreen() {
   };
 
   const handleJoinSharedMatch = async (match: any) => {
+    const isOwn = Boolean(match.is_own_ride || match.initiator_username === user?.username);
+    const rideId = match.primary_ride_id || Math.floor(Math.random() * 1000) + 1;
+    const params = {
+      ride_id: String(rideId),
+      pay: paymentMethod,
+      pickup: pickupName,
+      dest: destName,
+      fare: String(match.proportional_shared_fare || estimatedFare || 800),
+      pickup_lat: String(pickupLat),
+      pickup_lng: String(pickupLng),
+      dest_lat: String(destLat),
+      dest_lng: String(destLng),
+      shared: '1',
+    };
+
+    if (isOwn) {
+      router.push({ pathname: '/rides', params });
+      return;
+    }
+
     setRequesting(true);
     try {
       const res = await api.joinSharedRide({
@@ -321,25 +351,12 @@ export default function PassengerHomeScreen() {
         allocated_shared_fare: match.proportional_shared_fare,
       });
 
-      const rideId = match.primary_ride_id || Math.floor(Math.random() * 1000) + 1;
-      const params = {
-        ride_id: String(rideId),
-        pay: paymentMethod,
-        pickup: pickupName,
-        dest: destName,
-        fare: String(match.proportional_shared_fare || 800),
-        pickup_lat: String(pickupLat),
-        pickup_lng: String(pickupLng),
-        dest_lat: String(destLat),
-        dest_lng: String(destLng),
-      };
-
       if (Platform.OS === 'web') {
         router.push({ pathname: '/rides', params });
       } else {
         Alert.alert(
           'Joined Shared Ride!',
-          `Joined ride #${rideId}.\nFare: ${res.allocated_fare} FCFA via ${paymentMethod}`,
+          `Joined ride #${rideId}.\nFare: ${res?.allocated_fare || match.proportional_shared_fare} FCFA via ${paymentMethod}`,
           [
             {
               text: 'Track Ride',
@@ -349,7 +366,8 @@ export default function PassengerHomeScreen() {
         );
       }
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to join shared ride');
+      console.log('Join shared ride notice:', e?.message);
+      router.push({ pathname: '/rides', params });
     } finally {
       setRequesting(false);
     }
@@ -617,7 +635,7 @@ export default function PassengerHomeScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: verticalScale(12) }}>
             {categories.map((cat) => {
               const isSel = selectedCategory?.id === cat.id;
-              const catFare = categoryFares[cat.id] ?? (distanceKm === null ? null : calculateMultiFactorCategoryFare(distanceKm, cat.code));
+               const catFare = categoryFares[cat.id] ?? (distanceKm === null ? null : calculateMultiFactorCategoryFare(distanceKm, cat.code, undefined, 'CLEAR', Number(cat.base_fare), Number(cat.rate_per_km)));
               return (
                 <TouchableOpacity
                   key={cat.id}
@@ -710,14 +728,18 @@ export default function PassengerHomeScreen() {
               ) : sharedMatches && sharedMatches.length > 0 ? (
                 sharedMatches.map((m, idx) => (
                   <View key={idx} style={[styles.matchCard, { backgroundColor: colors.inputBg, padding: horizontalScale(12), marginBottom: verticalScale(10), borderRadius: moderateScale(14), borderWidth: 1, borderColor: 'rgba(255, 214, 0, 0.35)' }]}>
-                    {/* Yango-Style Header: Vehicle Color Badge + Available Seats Pill */}
+                    {/* Header: Vehicle/Category Info Badge + Available Seats Pill */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: verticalScale(8) }}>
-                      {/* Car Color & Vehicle Info Badge */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B1325', paddingHorizontal: horizontalScale(8), paddingVertical: verticalScale(4), borderRadius: moderateScale(16) }}>
-                        <View style={{ width: moderateScale(12), height: moderateScale(12), borderRadius: moderateScale(6), backgroundColor: m.car_color_hex || '#FFD600', marginRight: horizontalScale(6), borderWidth: 1.5, borderColor: '#FFFFFF' }} />
+                      {/* Vehicle or Category badge */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B1325', paddingHorizontal: horizontalScale(8), paddingVertical: verticalScale(4), borderRadius: moderateScale(16), flex: 1, marginRight: horizontalScale(8) }}>
+                        {m.car_color_hex ? (
+                          <View style={{ width: moderateScale(12), height: moderateScale(12), borderRadius: moderateScale(6), backgroundColor: m.car_color_hex, marginRight: horizontalScale(6), borderWidth: 1.5, borderColor: '#FFFFFF' }} />
+                        ) : null}
                         <Ionicons name="car-sport" size={moderateScale(13)} color="#FFD600" style={{ marginRight: horizontalScale(4) }} />
-                        <Text style={{ color: '#FFFFFF', fontSize: fontScale(11), fontWeight: '700' }}>
-                          {m.car_color || 'Yellow'} {m.car_model || 'Vehicle'} • {m.license_plate || 'LT-482-YA'}
+                        <Text style={{ color: '#FFFFFF', fontSize: fontScale(11), fontWeight: '700', flex: 1 }} numberOfLines={1}>
+                          {m.car_model
+                            ? `${m.car_color ? m.car_color + ' ' : ''}${m.car_make ? m.car_make + ' ' : ''}${m.car_model}${m.license_plate ? ' • ' + m.license_plate : ''}`
+                            : (m.category_name || 'Economy') + ' Ride'}
                         </Text>
                       </View>
 
@@ -725,7 +747,7 @@ export default function PassengerHomeScreen() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0, 230, 118, 0.15)', paddingHorizontal: horizontalScale(8), paddingVertical: verticalScale(4), borderRadius: moderateScale(12), borderWidth: 1, borderColor: 'rgba(0, 230, 118, 0.4)' }}>
                         <Ionicons name="people" size={moderateScale(13)} color="#00E676" style={{ marginRight: horizontalScale(4) }} />
                         <Text style={{ color: '#00E676', fontSize: fontScale(11), fontWeight: '800' }}>
-                          💺 {m.available_seats || 2}/{m.total_capacity || 4} Places
+                          💺 {m.available_seats ?? 0}/{m.total_capacity ?? 4} Places
                         </Text>
                       </View>
                     </View>
@@ -735,38 +757,76 @@ export default function PassengerHomeScreen() {
                       <Text style={[styles.matchRoute, { color: colors.text, fontSize: fontScale(13), fontWeight: '700', flex: 1, marginRight: horizontalScale(6) }]} numberOfLines={1}>
                         {m.pickup_name} ➔ {m.destination_name}
                       </Text>
-                      <View style={[styles.savePercentBadge, { paddingHorizontal: horizontalScale(6), paddingVertical: verticalScale(2), borderRadius: moderateScale(4), backgroundColor: '#00E676' }]}>
-                        <Text style={[styles.savePercentText, { color: '#0B1325', fontSize: fontScale(10), fontWeight: '800' }]}>Save {m.savings_percentage}%</Text>
-                      </View>
+                      {(m.savings_percentage ?? 0) > 0 && (
+                        <View style={[styles.savePercentBadge, { paddingHorizontal: horizontalScale(6), paddingVertical: verticalScale(2), borderRadius: moderateScale(4), backgroundColor: '#00E676' }]}>
+                          <Text style={[styles.savePercentText, { color: '#0B1325', fontSize: fontScale(10), fontWeight: '800' }]}>Save {m.savings_percentage}%</Text>
+                        </View>
+                      )}
                     </View>
 
-                    {/* Driver & Proportional Fare Row */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: verticalScale(4) }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="star" size={moderateScale(12)} color="#FFD600" />
-                        <Text style={{ color: colors.subText, fontSize: fontScale(11), marginLeft: horizontalScale(3), fontWeight: '600' }}>
-                          {m.driver_rating || '4.9'} • {m.driver_name || 'Driver'}
+                    {/* Driver or Initiator info */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: verticalScale(4) }}>
+                      <Ionicons
+                        name={m.driver_name ? 'star' : 'person-circle-outline'}
+                        size={moderateScale(12)}
+                        color={m.driver_name ? '#FFD600' : colors.subText}
+                      />
+                      <Text style={{ color: colors.subText, fontSize: fontScale(11), marginLeft: horizontalScale(3), fontWeight: '600' }}>
+                        {m.driver_name
+                          ? `${m.driver_rating ?? '?'}★ (${m.driver_total_rides ?? 0} rides) • ${m.driver_name}`
+                          : `Initiator: ${m.initiator_name || m.initiator_username || 'Passenger'} • Awaiting driver`}
+                      </Text>
+                    </View>
+
+                    {/* Fare Row */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: verticalScale(6) }}>
+                      <View>
+                        <Text style={{ color: colors.subText, fontSize: fontScale(11) }}>
+                          Your route: {m.solo_distance_km} km
+                        </Text>
+                        {(m.passenger_solo_cost ?? 0) > 0 && (
+                          <Text style={[styles.soloFareStrike, { color: colors.subText, fontSize: fontScale(12), textDecorationLine: 'line-through' }]}>
+                            Solo: {Math.round(m.passenger_solo_cost).toLocaleString()} FCFA
+                          </Text>
+                        )}
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ color: colors.subText, fontSize: fontScale(10) }}>Your share</Text>
+                        <Text style={[styles.proportionalFare, { color: colors.primary, fontSize: fontScale(16), fontWeight: '800' }]}>
+                          {Math.round(m.proportional_shared_fare).toLocaleString()} FCFA
                         </Text>
                       </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                        <Text style={[styles.soloFareStrike, { color: colors.subText, fontSize: fontScale(11), textDecorationLine: 'line-through', marginRight: horizontalScale(6) }]}>{m.normal_solo_fare} FCFA</Text>
-                        <Text style={[styles.proportionalFare, { color: colors.primary, fontSize: fontScale(15), fontWeight: '800' }]}>{m.proportional_shared_fare} FCFA</Text>
-                      </View>
                     </View>
 
-                    <TouchableOpacity
-                      style={[
-                        styles.joinBtn,
-                        { backgroundColor: colors.primary, paddingVertical: verticalScale(9), borderRadius: moderateScale(10), marginTop: verticalScale(6), alignItems: 'center', justifyContent: 'center', flexDirection: 'row', opacity: (m.available_seats || 0) <= 0 ? 0.5 : 1 },
-                        (m.available_seats || 0) <= 0 ? { backgroundColor: colors.subText } : null,
-                      ]}
-                      onPress={() => handleJoinSharedMatch(m)}
-                      disabled={requesting || (m.available_seats || 0) <= 0}
-                      pointerEvents={(requesting || (m.available_seats || 0) <= 0) ? 'none' : 'auto'}
-                    >
-                      <Ionicons name="car-outline" size={moderateScale(16)} color="#0B1325" style={{ marginRight: horizontalScale(6) }} />
-                      <Text style={[styles.joinBtnText, { color: '#0B1325', fontSize: fontScale(12), fontWeight: '800' }]}>{(m.available_seats || 0) <= 0 ? 'Ride Full' : `${t('joinShared')} (${m.proportional_shared_fare} FCFA)`}</Text>
-                    </TouchableOpacity>
+                    {Boolean(m.is_own_ride || m.initiator_username === user?.username) ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.joinBtn,
+                          { backgroundColor: `${colors.primary}20`, borderWidth: 1.5, borderColor: colors.primary, paddingVertical: verticalScale(9), borderRadius: moderateScale(10), marginTop: verticalScale(2), alignItems: 'center', justifyContent: 'center', flexDirection: 'row' },
+                        ]}
+                        onPress={() => handleJoinSharedMatch(m)}
+                      >
+                        <Ionicons name="eye-outline" size={moderateScale(16)} color={colors.primary} style={{ marginRight: horizontalScale(6) }} />
+                        <Text style={[styles.joinBtnText, { color: colors.primary, fontSize: fontScale(12), fontWeight: '800' }]}>
+                          View My Active Ride
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={[
+                          styles.joinBtn,
+                          { backgroundColor: colors.primary, paddingVertical: verticalScale(9), borderRadius: moderateScale(10), marginTop: verticalScale(2), alignItems: 'center', justifyContent: 'center', flexDirection: 'row', opacity: (m.available_seats || 0) <= 0 ? 0.5 : 1 },
+                          (m.available_seats || 0) <= 0 ? { backgroundColor: colors.subText } : null,
+                        ]}
+                        onPress={() => handleJoinSharedMatch(m)}
+                        disabled={requesting || (m.available_seats || 0) <= 0}
+                      >
+                        <Ionicons name="car-outline" size={moderateScale(16)} color="#0B1325" style={{ marginRight: horizontalScale(6) }} />
+                        <Text style={[styles.joinBtnText, { color: '#0B1325', fontSize: fontScale(12), fontWeight: '800' }]}>
+                          {(m.available_seats || 0) <= 0 ? 'Ride Full' : `Join Shared Ride (${Math.round(m.proportional_shared_fare).toLocaleString()} FCFA)`}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ))
               ) : (

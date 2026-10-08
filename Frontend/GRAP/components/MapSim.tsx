@@ -91,7 +91,7 @@ export default function MapSim({
 
 const styles = StyleSheet.create({
   mapContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...(StyleSheet.absoluteFill as object),
     backgroundColor: '#0F172A', // Yango sleek dark map background
     overflow: 'hidden',
   },
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
   },
   routeLineContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...(StyleSheet.absoluteFill as object),
   },
   routePolyline: {
     position: 'absolute',

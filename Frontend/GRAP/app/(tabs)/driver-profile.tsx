@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -9,13 +9,22 @@ export default function DriverProfileScreen() {
   const { user, logout } = useAuth();
   const { colors } = useTheme();
   const { t } = useLanguage();
+  const [imgError, setImgError] = useState(false);
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.bg }]} contentContainerStyle={{ padding: 16 }}>
       {/* Profile Header */}
       <View style={[styles.profileHeaderCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-        <View style={[styles.avatarLarge, { backgroundColor: `${colors.secondary}20`, borderColor: colors.secondary }]}>
-          <Text style={[styles.avatarLargeText, { color: colors.secondary }]}>{user?.username?.charAt(0).toUpperCase() || 'D'}</Text>
+        <View style={[styles.avatarLarge, { backgroundColor: `${colors.secondary}20`, borderColor: colors.secondary, overflow: 'hidden' }]}>
+          {user?.profile_picture_url && !imgError ? (
+            <Image
+              source={{ uri: user.profile_picture_url }}
+              style={styles.avatarImage}
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <Text style={[styles.avatarLargeText, { color: colors.secondary }]}>{user?.username?.charAt(0).toUpperCase() || 'D'}</Text>
+          )}
         </View>
         <Text style={[styles.driverName, { color: colors.text }]}>{user?.username || 'GRAP Driver'}</Text>
         <Text style={[styles.licenseText, { color: colors.subText }]}>@{user?.username || 'driver'}</Text>
@@ -85,6 +94,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     marginBottom: 10,
+  },
+  avatarImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
   },
   avatarLargeText: {
     fontSize: 28,

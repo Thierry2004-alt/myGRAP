@@ -11,6 +11,7 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PASSENGER)
     phone_number = models.CharField(max_length=20, blank=True, default='')
+    profile_picture_url = models.TextField(blank=True, default='')
     is_verified = models.BooleanField(default=False)
     is_suspended = models.BooleanField(default=False)
     verification_code_hash = models.CharField(max_length=128, blank=True, default='')
@@ -175,7 +176,12 @@ class Payment(models.Model):
         FAILED = 'FAILED', 'Failed'
         REFUNDED = 'REFUNDED', 'Refunded'
 
-    ride = models.OneToOneField(Ride, on_delete=models.CASCADE, related_name='payment')
+    ride = models.ForeignKey(Ride, on_delete=models.CASCADE, related_name='payments')
+    # For shared rides: which participant made this payment (null = primary passenger / non-shared)
+    participant = models.ForeignKey(
+        'SharedRideParticipant', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='payments'
+    )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     method = models.CharField(max_length=20, choices=Method.choices, default=Method.CASH)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
@@ -230,11 +236,20 @@ class SharedRideParticipant(models.Model):
 class DriverEarning(models.Model):
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='earnings')
     ride = models.ForeignKey(Ride, on_delete=models.CASCADE, related_name='earnings')
+    # For shared rides, track which participant's fare generated this earning (null = primary/solo)
+    source_participant = models.ForeignKey(
+        'SharedRideParticipant', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='driver_earnings'
+    )
     gross_fare = models.DecimalField(max_digits=10, decimal_places=2)
-    commission_rate = models.FloatField(default=15.0) # 15% platform commission
+    commission_rate = models.FloatField(default=15.0)
     commission_amount = models.DecimalField(max_digits=10, decimal_places=2)
     net_earning = models.DecimalField(max_digits=10, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Prevent duplicate earning for same driver+ride+participant combination
+        unique_together = [('driver', 'ride', 'source_participant')]
 
     def __str__(self):
         return f"Earning Driver {self.driver.username}: {self.net_earning} FCFA"

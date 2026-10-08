@@ -1,13 +1,35 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../services/api';
+import { activeRideStorage } from '../../services/storage';
+import { useAuth } from '../../context/AuthContext';
 
 export default function ActiveRideTrackerScreen() {
+  const { user } = useAuth();
   const [rideState, setRideState] = useState<'REQUESTED' | 'ACCEPTED' | 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED'>('ACCEPTED');
   const [cashOtp, setCashOtp] = useState('4892');
   const [inputOtp, setInputOtp] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [driverName, setDriverName] = useState('Paul Nkoa');
+  const [vehicleInfo, setVehicleInfo] = useState('Toyota Yaris • CE-992-AA');
+  const [driverPicture, setDriverPicture] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadActiveRide = async () => {
+      try {
+        const stored = await activeRideStorage.get();
+        if (stored) {
+          setDriverName(stored.driver_name || 'Paul Nkoa');
+          setVehicleInfo(stored.vehicle_info || 'Toyota Yaris • CE-992-AA');
+          setDriverPicture(stored.driver_profile_picture_url || null);
+        }
+      } catch (e) {
+        console.log('Active ride load error:', e);
+      }
+    };
+    loadActiveRide();
+  }, []);
 
   const simulateNextState = () => {
     if (rideState === 'REQUESTED') setRideState('ACCEPTED');
@@ -56,11 +78,15 @@ export default function ActiveRideTrackerScreen() {
         <Text style={styles.cardSectionTitle}>Assigned Driver</Text>
         <View style={styles.driverRow}>
           <View style={styles.driverAvatar}>
-            <Ionicons name="person" size={24} color="#00E676" />
+            {driverPicture ? (
+              <Image source={{ uri: driverPicture }} style={styles.driverAvatarImage} />
+            ) : (
+              <Ionicons name="person" size={24} color="#00E676" />
+            )}
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.driverName}>Paul Nkoa</Text>
-            <Text style={styles.vehicleInfo}>Toyota Yaris • CE-992-AA</Text>
+            <Text style={styles.driverName}>{driverName}</Text>
+            <Text style={styles.vehicleInfo}>{vehicleInfo}</Text>
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={14} color="#FFD600" />
               <Text style={styles.ratingText}>4.9 (42 rides)</Text>
@@ -207,6 +233,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 230, 118, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  driverAvatarImage: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
   },
   driverName: {
     color: '#FFFFFF',

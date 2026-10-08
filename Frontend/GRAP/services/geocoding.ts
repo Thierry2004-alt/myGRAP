@@ -200,12 +200,15 @@ export async function searchPlaces(query: string): Promise<PlaceSuggestion[]> {
 }
 
 export async function reverseGeocode(latitude: number, longitude: number): Promise<PlaceSuggestion> {
-  const fallbackName = `Pinned location (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`;
+  const fallbackName = `GPS Position (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`;
   try {
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
       { headers: { Accept: 'application/json', 'User-Agent': 'GRAP-Ride-App/1.0' } }
     );
+    if (!response.ok) {
+      throw new Error('Geocoding blocked');
+    }
     const data = await response.json();
     const address = data.address || {};
     const name = data.name || address.road || address.suburb || fallbackName;
@@ -238,68 +241,56 @@ export function calculateMultiFactorCategoryFare(
   distanceKm: number,
   categoryCode: string,
   hour?: number,
-  weather: string = 'CLEAR'
+  weather: string = 'CLEAR',
+  baseFare?: number,
+  ratePerKm?: number
 ): number {
   const dist = distanceKm < 1.0 ? 1.0 : distanceKm;
 
-  let baseFare = 300;
-  let ratePerKm = 100;
-  let minFare = 400;
-
-  switch (categoryCode) {
-    case 'MOTO':
-      baseFare = 250;
-      ratePerKm = 70;
-      minFare = 400;
-      break;
-    case 'COMFORT':
-      baseFare = 700;
-      ratePerKm = 150;
-      minFare = 1000;
-      break;
-    case 'COMFORT_PLUS':
-      baseFare = 1000;
-      ratePerKm = 200;
-      minFare = 1500;
-      break;
-    case 'ECONOMY':
-    default:
-      baseFare = 300;
-      ratePerKm = 100;
-      minFare = 400;
-      break;
+  if (typeof baseFare !== 'number') {
+    switch (categoryCode) {
+      case 'MOTO':
+        baseFare = 300;
+        break;
+      case 'COMFORT':
+        baseFare = 800;
+        break;
+      case 'COMFORT_PLUS':
+        baseFare = 1200;
+        break;
+      case 'ECONOMY':
+      default:
+        baseFare = 500;
+        break;
+    }
   }
 
-  const rawFare = baseFare + (dist * ratePerKm);
+  const rawFare = baseFare + dist * 110;
 
-  // 1. Time-of-Day Multiplier
-  const currentHour = hour !== undefined ? hour : new Date().getHours();
+  const currentHour = hour !== undefined ? hour : new Date().getUTCHours();
   let timeMultiplier = 1.0;
   if (currentHour >= 21 || currentHour < 6) {
-    timeMultiplier = 1.35; // Night Shift Surge (+35%)
+    timeMultiplier = 1.35;
   } else if ((currentHour >= 7 && currentHour <= 9) || (currentHour >= 17 && currentHour <= 19)) {
-    timeMultiplier = 1.20; // Peak Rush Hour Surge (+20%)
+    timeMultiplier = 1.20;
   }
 
-  // 2. Weather Multiplier
   let weatherMultiplier = 1.0;
   const wUpper = weather.toUpperCase();
   if (wUpper.includes('HEAVY') || wUpper.includes('THUNDER') || wUpper === 'HEAVY_RAIN') {
-    weatherMultiplier = 1.40; // Heavy Rain Surge (+40%)
+    weatherMultiplier = 1.40;
   } else if (wUpper.includes('RAIN') || wUpper.includes('DRIZZLE') || wUpper === 'RAIN') {
-    weatherMultiplier = 1.20; // Rain Surge (+20%)
+    weatherMultiplier = 1.20;
   }
 
   const totalFare = rawFare * timeMultiplier * weatherMultiplier;
-  const fareWithMin = Math.max(totalFare, minFare);
-  
-  // Round to nearest 50 FCFA
+  const fareWithMin = Math.max(totalFare, baseFare);
   const roundedFCFA = Math.round(fareWithMin / 50) * 50;
   return roundedFCFA;
 }
 
 export function getDynamicFareSurgeBadges(hour?: number, weather: string = 'CLEAR'): string[] {
-  const currentHour = hour !== undefined ? hour : new Date().getHours();
+  const currentHour = hour !== undefined ? hour : new Date().getUTCHours();
   const badges: string[] = [];
 
   if (currentHour >= 21 || currentHour < 6) {

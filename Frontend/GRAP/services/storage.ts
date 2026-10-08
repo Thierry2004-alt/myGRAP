@@ -115,3 +115,61 @@ export const loyaltyStorage = {
     return updated;
   },
 };
+
+const SAVINGS_KEY = '@user_shared_savings';
+const getSavingsKey = (userId?: number | string) => `${SAVINGS_KEY}:${userId || 'anonymous'}`;
+
+export const savingsStorage = {
+  async getSavings(userId?: number | string): Promise<number> {
+    const val = await safeStorage.getItem(getSavingsKey(userId));
+    return val ? parseInt(val, 10) || 0 : 0;
+  },
+
+  async addSavings(amount: number, userId?: number | string): Promise<number> {
+    const current = await this.getSavings(userId);
+    const updated = current + amount;
+    await safeStorage.setItem(getSavingsKey(userId), updated.toString());
+    return updated;
+  },
+
+  async setSavings(amount: number, userId?: number | string): Promise<void> {
+    await safeStorage.setItem(getSavingsKey(userId), amount.toString());
+  },
+};
+
+
+const DISMISSED_RIDES_KEY = '@dismissed_ride_ids';
+
+export const dismissedRideStorage = {
+  async getIds(): Promise<string[]> {
+    const raw = await safeStorage.getItem(DISMISSED_RIDES_KEY);
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.map(String) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async addId(id: string | number | undefined | null): Promise<void> {
+    if (!id && id !== 0) return;
+    const strId = String(id);
+    const existing = await this.getIds();
+    if (!existing.includes(strId)) {
+      existing.push(strId);
+      await safeStorage.setItem(DISMISSED_RIDES_KEY, JSON.stringify(existing));
+    }
+  },
+
+  async isDismissed(id: string | number | undefined | null): Promise<boolean> {
+    if (!id && id !== 0) return false;
+    const existing = await this.getIds();
+    return existing.includes(String(id));
+  },
+
+  async clear(): Promise<void> {
+    await safeStorage.removeItem(DISMISSED_RIDES_KEY);
+  },
+};
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../services/api';
 import { useTheme } from '../../context/ThemeContext';
@@ -27,18 +27,41 @@ export default function DriverAIAnalyticsScreen() {
     }
   };
 
+  const topZones = data?.top_demand_zones || [];
+  const recommendations = data?.ai_recommendations || [];
+  const totalSearches = data?.total_platform_searches || 0;
+  const completedTrips = data?.driver_total_rides || 0;
+
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.bg }]} contentContainerStyle={{ padding: 16 }}>
-      {/* Banner */}
+      {/* Header Banner */}
       <View style={[styles.aiHeaderBanner, { backgroundColor: colors.card, borderColor: colors.primary }]}>
         <View style={[styles.aiBadge, { backgroundColor: `${colors.primary}20` }]}>
-          <Ionicons name="sparkles" size={20} color={colors.primary} />
+          <Ionicons name="sparkles" size={22} color={colors.primary} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.aiTitle, { color: colors.text }]}>GRAP Driver AI Decision Support</Text>
           <Text style={[styles.aiSub, { color: colors.subText }]}>
-            Historical demand analytics & personalized operational recommendations to maximize earnings.
+            Live platform search analytics & personalized operational recommendations to maximize earnings.
           </Text>
+        </View>
+        <TouchableOpacity onPress={loadAIRecommendations} style={{ padding: 4 }}>
+          <Ionicons name="reload" size={18} color={colors.primary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Real-time Platform Search Metrics */}
+      <View style={[styles.metricRow]}>
+        <View style={[styles.metricCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <Ionicons name="search-circle" size={24} color={colors.primary} />
+          <Text style={[styles.metricValue, { color: colors.text }]}>{totalSearches}</Text>
+          <Text style={[styles.metricLabel, { color: colors.subText }]}>Real Passenger Searches</Text>
+        </View>
+
+        <View style={[styles.metricCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <Ionicons name="checkmark-circle" size={24} color={colors.secondary} />
+          <Text style={[styles.metricValue, { color: colors.text }]}>{completedTrips}</Text>
+          <Text style={[styles.metricLabel, { color: colors.subText }]}>Completed Trips</Text>
         </View>
       </View>
 
@@ -47,55 +70,88 @@ export default function DriverAIAnalyticsScreen() {
       ) : (
         <>
           {/* Personalized Routine Recommendations */}
-          <Text style={[styles.sectionTitle, { color: colors.subText }]}>{t('personalAdvice')}</Text>
-          <View style={[styles.recCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={styles.recTopRow}>
-              <View style={styles.recTitleGroup}>
-                <Ionicons name="bulb" size={18} color="#FFD600" />
-                <Text style={[styles.recCardTitle, { color: colors.text }]}>Personal Routine Insight</Text>
-              </View>
-              <View style={styles.confidenceTag}>
-                <Text style={styles.confidenceText}>92% Match</Text>
-              </View>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            {t('personalAdvice') || 'Personalized AI Recommendations'}
+          </Text>
+
+          {recommendations.length === 0 ? (
+            <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <Text style={[styles.emptyText, { color: colors.subText }]}>
+                Complete more trips to generate customized routine insights.
+              </Text>
             </View>
+          ) : (
+            recommendations.map((rec: any, idx: number) => (
+              <View key={rec.id || idx} style={[styles.recCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={styles.recTopRow}>
+                  <View style={styles.recTitleGroup}>
+                    <Ionicons name="bulb" size={18} color="#FFD600" />
+                    <Text style={[styles.recCardTitle, { color: colors.text }]}>{rec.title}</Text>
+                  </View>
+                  <View style={styles.confidenceTag}>
+                    <Text style={styles.confidenceText}>{Math.round((rec.confidence || 0.9) * 100)}% Match</Text>
+                  </View>
+                </View>
 
-            <Text style={[styles.recMessage, { color: colors.text }]}>
-              Based on your last 14 days, you frequently finish trips near Bastos. High demand is predicted around Mvan → Bastos between 17:00 and 19:00 today. Position near Mvan station before 17:30.
-            </Text>
+                <Text style={[styles.recMessage, { color: colors.text }]}>{rec.message}</Text>
 
-            <View style={styles.recFooter}>
-              <View style={[styles.recPill, { backgroundColor: colors.inputBg }]}>
-                <Ionicons name="location" size={12} color={colors.primary} />
-                <Text style={[styles.recPillText, { color: colors.text }]}>Mvan Station</Text>
+                <View style={styles.recFooter}>
+                  {rec.target_zone && (
+                    <View style={[styles.recPill, { backgroundColor: colors.inputBg }]}>
+                      <Ionicons name="location" size={12} color={colors.primary} />
+                      <Text style={[styles.recPillText, { color: colors.text }]}>{rec.target_zone}</Text>
+                    </View>
+                  )}
+                  {rec.time_window && (
+                    <View style={[styles.recPill, { backgroundColor: colors.inputBg }]}>
+                      <Ionicons name="time" size={12} color={colors.secondary} />
+                      <Text style={[styles.recPillText, { color: colors.text }]}>{rec.time_window}</Text>
+                    </View>
+                  )}
+                </View>
               </View>
-              <View style={[styles.recPill, { backgroundColor: colors.inputBg }]}>
-                <Ionicons name="time" size={12} color={colors.secondary} />
-                <Text style={[styles.recPillText, { color: colors.text }]}>17:00 - 19:00</Text>
-              </View>
-            </View>
-          </View>
+            ))
+          )}
 
-          {/* High Demand Zones */}
-          <Text style={[styles.sectionTitle, { color: colors.subText }]}>{t('highDemandZones')}</Text>
+          {/* Real High Demand Zones */}
+          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 10 }]}>
+            {t('highDemandZones') || 'High Demand Search Zones'}
+          </Text>
           <View style={styles.zoneGrid}>
-            {[
-              { zone_name: 'Mvan Bus Station', peak_time: '17:00 - 19:00', score: 92 },
-              { zone_name: 'Bastos Ambassades', peak_time: '18:00 - 20:00', score: 85 },
-              { zone_name: 'Marché Mokolo', peak_time: '07:00 - 09:00', score: 90 },
-            ].map((zone, idx) => (
-              <View key={idx} style={[styles.zoneCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <View style={styles.zoneHeader}>
-                  <Text style={[styles.zoneName, { color: colors.text }]}>{zone.zone_name}</Text>
-                  <Ionicons name="flame" size={18} color="#FF5252" />
-                </View>
-                <Text style={[styles.zoneTime, { color: colors.subText }]}>Peak: {zone.peak_time}</Text>
+            {topZones.map((zone: any, idx: number) => {
+              const score = zone.demand_score || 80;
+              const searchCount = zone.total_searches || 1;
 
-                <View style={[styles.progressTrack, { backgroundColor: colors.inputBg }]}>
-                  <View style={[styles.progressFill, { width: `${zone.score}%` }]} />
+              return (
+                <View key={idx} style={[styles.zoneCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <View style={styles.zoneHeader}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={[styles.zoneName, { color: colors.text }]}>{zone.zone_name}</Text>
+                      <Text style={[styles.zoneTime, { color: colors.subText }]}>
+                        Peak Window: {zone.peak_time} • {searchCount} searches logged
+                      </Text>
+                    </View>
+                    <Ionicons name="flame" size={20} color={score > 85 ? '#FF5252' : '#FFB300'} />
+                  </View>
+
+                  <View style={[styles.progressTrack, { backgroundColor: colors.inputBg }]}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${score}%`,
+                          backgroundColor: score > 85 ? '#FF5252' : '#FFB300',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                    <Text style={[styles.scoreText, { color: colors.subText }]}>Demand Intensity</Text>
+                    <Text style={[styles.scoreText, { color: colors.text, fontWeight: '800' }]}>{score}/100</Text>
+                  </View>
                 </View>
-                <Text style={[styles.scoreText, { color: colors.subText }]}>Demand Intensity: {zone.score}/100</Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
         </>
       )}
@@ -111,10 +167,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     gap: 12,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   aiBadge: {
     width: 44,
@@ -124,24 +180,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   aiTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
   aiSub: {
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 2,
-    lineHeight: 16,
+    lineHeight: 15,
+  },
+  metricRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 18,
+  },
+  metricCard: {
+    flex: 1,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  metricValue: {
+    fontSize: 22,
+    fontWeight: '900',
+    marginTop: 4,
+  },
+  metricLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'center',
   },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 12,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 10,
   },
   recCard: {
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   recTopRow: {
     flexDirection: 'row',
@@ -155,7 +234,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   recCardTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   confidenceTag: {
@@ -177,6 +256,7 @@ const styles = StyleSheet.create({
   recFooter: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
   },
   recPill: {
     flexDirection: 'row',
@@ -187,11 +267,11 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   recPillText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   zoneGrid: {
-    gap: 12,
+    gap: 10,
     marginBottom: 24,
   },
   zoneCard: {
@@ -203,29 +283,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
   },
   zoneName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   zoneTime: {
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 2,
-    marginBottom: 10,
   },
   progressTrack: {
     height: 6,
     borderRadius: 3,
     overflow: 'hidden',
-    marginBottom: 6,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#FF5252',
     borderRadius: 3,
   },
   scoreText: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  emptyCard: {
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emptyText: {
+    fontSize: 12,
+    textAlign: 'center',
   },
 });

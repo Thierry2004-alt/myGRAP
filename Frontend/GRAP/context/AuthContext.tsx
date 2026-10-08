@@ -2,6 +2,20 @@ import React, { createContext, useState, useEffect, useContext, useCallback } fr
 import { safeStorage } from '../services/storage';
 import { api, User } from '../services/api';
 
+// Resolve effective role using all available signals from the backend
+function resolveRole(u: any): 'PASSENGER' | 'DRIVER' | 'ADMIN' {
+  if (
+    u?.role === 'ADMIN' ||
+    u?.is_superuser === true ||
+    u?.is_staff === true ||
+    u?.username === 'admin'
+  ) {
+    return 'ADMIN';
+  }
+  if (u?.role === 'DRIVER') return 'DRIVER';
+  return 'PASSENGER';
+}
+
 interface AuthContextType {
   user: User | null;
   role: 'PASSENGER' | 'DRIVER' | 'ADMIN';
@@ -33,8 +47,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setToken(storedToken);
         const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Session check timed out')), 8000));
         const me = await Promise.race([api.getMe(), timeoutPromise]);
-        setUser((me as any).user);
-        setRole((me as any).user.role);
+        const resolvedUser = (me as any).user;
+        setUser(resolvedUser);
+        setRole(resolveRole(resolvedUser));
       }
     } catch (e) {
       console.log('No active session or token expired');
@@ -54,7 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const res = await api.login(u, p);
     setToken(res.access);
     setUser(res.user);
-    setRole(res.user.role);
+    setRole(resolveRole(res.user));
   };
 
   const register = async (data: any) => {
@@ -73,7 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshUser = useCallback(async () => {
     const me = await api.getMe();
     setUser(me.user);
-    setRole(me.user.role);
+    setRole(resolveRole(me.user));
   }, []);
 
   const requestEmailVerification = async () => {
@@ -85,7 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(result.user);
   };
 
-  const updateProfile = async (data: { first_name: string; last_name: string; email: string; phone_number: string }) => {
+  const updateProfile = async (data: { first_name: string; last_name: string; email: string; phone_number: string; profile_picture_url?: string }) => {
     const updatedUser = await api.updateMe(data);
     setUser(updatedUser);
   };

@@ -1,17 +1,27 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, TextInput, Platform, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { api } from '../../services/api';
 import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useResponsive } from '../../utils/responsive';
+
+const YAOUNDE_HUBS = [
+  { name: 'Mvan Bus Station', lat: 3.8400, lng: 11.5000 },
+  { name: 'Odza Borne 12', lat: 3.7741, lng: 11.5372 },
+  { name: 'Bastos Ambassades', lat: 3.8750, lng: 11.5180 },
+  { name: 'IAI Cameroun (Awae)', lat: 3.8565, lng: 11.5512 },
+  { name: 'Centre-Ville', lat: 3.8660, lng: 11.5170 },
+  { name: 'Mokolo Marché', lat: 3.8730, lng: 11.4980 },
+];
 
 export default function VoluntaryShareRideScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { t } = useLanguage();
   const { horizontalScale, verticalScale, moderateScale, fontScale } = useResponsive();
+
   const [pickupName, setPickupName] = useState('Mvan Bus Station, Yaounde');
   const [pickupLat, setPickupLat] = useState(3.8400);
   const [pickupLng, setPickupLng] = useState(11.5000);
@@ -27,7 +37,6 @@ export default function VoluntaryShareRideScreen() {
 
   const handleSearchSharedRides = async () => {
     setSearching(true);
-    setSearchResults(null);
     try {
       const res = await api.searchSharedRides({
         pickup_lat: pickupLat,
@@ -35,15 +44,34 @@ export default function VoluntaryShareRideScreen() {
         destination_lat: destLat,
         destination_lng: destLng,
       });
-      setSearchResults(res.shareable_rides);
+      setSearchResults(res.shareable_rides || []);
     } catch (e: any) {
-      Alert.alert('Search Error', e.message || 'Failed to search shared rides');
+      console.log('Search shared rides error:', e?.message);
+      setSearchResults([]);
     } finally {
       setSearching(false);
     }
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      void handleSearchSharedRides();
+    }, [pickupLat, pickupLng, destLat, destLng])
+  );
+
   const handleJoinSharedRide = async (sharedItem: any) => {
+    if (sharedItem.is_own_ride) {
+      router.push({
+        pathname: '/rides',
+        params: {
+          ride_id: String(sharedItem.primary_ride_id),
+          shared: '1',
+        },
+      });
+      return;
+    }
+
+    if (joiningId === sharedItem.shared_ride_id || (sharedItem.available_seats || 0) <= 0) return;
     setJoiningId(sharedItem.shared_ride_id);
     try {
       const res = await api.joinSharedRide({
@@ -59,17 +87,18 @@ export default function VoluntaryShareRideScreen() {
 
       Alert.alert(
         'Joined Shared Ride!',
-        `You joined ride #${sharedItem.primary_ride_id}.\nYour allocated fare: ${res.allocated_fare} FCFA`,
+        `You joined ride #${sharedItem.primary_ride_id}.\nYour allocated fare: ${Number(res.allocated_fare || sharedItem.proportional_shared_fare).toLocaleString()} FCFA`,
         [{ 
           text: 'Go to Active Ride', 
           onPress: () => router.push({
             pathname: '/rides',
             params: {
               ride_id: String(sharedItem.primary_ride_id),
+              shared: '1',
               pay: 'CASH',
               pickup: pickupName,
               dest: destName,
-              fare: String(res.allocated_fare || 800),
+              fare: String(res.allocated_fare || sharedItem.proportional_shared_fare || 800),
               pickup_lat: String(pickupLat),
               pickup_lng: String(pickupLng),
               dest_lat: String(destLat),
@@ -78,8 +107,11 @@ export default function VoluntaryShareRideScreen() {
           }) 
         }]
       );
+      await handleSearchSharedRides();
     } catch (e: any) {
-      Alert.alert('Error Joining', e.message || 'Could not join shared ride');
+      const msg = e.message || 'Could not join shared ride';
+      console.error('Join shared ride error:', msg);
+      Alert.alert('Error Joining', msg);
     } finally {
       setJoiningId(null);
     }
@@ -88,7 +120,6 @@ export default function VoluntaryShareRideScreen() {
   const handleMakeShareable = async () => {
     setMakeShareableLoading(true);
     try {
-      // Create a base ride request first, then make shareable
       const cats = await api.getCategories();
       const economyCat = cats[0] || { id: 1 };
       
@@ -106,59 +137,119 @@ export default function VoluntaryShareRideScreen() {
       Alert.alert(
         'Ride Made Shareable!',
         `Your ride #${newRide.id} is now available for compatible passengers to join on route.`,
-        [{ text: 'View Status', onPress: () => router.push('/active-ride') }]
+        [{ text: 'View Status', onPress: () => router.push({ pathname: '/rides', params: { ride_id: String(newRide.id), pay: 'CASH', pickup: pickupName, dest: destName } }) }]
       );
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to make ride shareable');
+      const msg = e.message || 'Failed to make ride shareable';
+      console.error('Make shareable error:', msg);
+      Alert.alert('Error', msg);
     } finally {
       setMakeShareableLoading(false);
     }
   };
 
+  const setHubPickup = (hub: typeof YAOUNDE_HUBS[0]) => {
+    setPickupName(hub.name);
+    setPickupLat(hub.lat);
+    setPickupLng(hub.lng);
+  };
+
+  const setHubDest = (hub: typeof YAOUNDE_HUBS[0]) => {
+    setDestName(hub.name);
+    setDestLat(hub.lat);
+    setDestLng(hub.lng);
+  };
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.bg }]} contentContainerStyle={{ padding: 16 }}>
       {/* Header Info Banner */}
-      <View style={styles.infoBanner}>
-        <Ionicons name="information-circle" size={24} color="#00E676" />
+      <View style={[styles.infoBanner, { backgroundColor: `${colors.primary}15`, borderColor: `${colors.primary}40` }]}>
+        <Ionicons name="people" size={24} color={colors.primary} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.infoTitle}>Voluntary Dynamic Ride-Sharing</Text>
-          <Text style={styles.infoBody}>
-            GRAP matches passengers with compatible routes. Rides are split using our fair proportional fare algorithm!
+          <Text style={[styles.infoTitle, { color: colors.primary }]}>Voluntary Dynamic Ride-Sharing</Text>
+          <Text style={[styles.infoBody, { color: colors.subText }]}>
+            GRAP matches passengers with compatible routes. Fares are split fairly proportional to distance!
           </Text>
         </View>
       </View>
 
       {/* Location Input Card */}
-      <View style={styles.inputCard}>
-        <Text style={styles.cardHeader}>Enter Desired Route</Text>
+      <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <Text style={[styles.cardHeader, { color: colors.text }]}>Enter Desired Route</Text>
         
         <View style={styles.inputRow}>
-          <Ionicons name="radio-button-on" size={18} color="#00E676" />
+          <Ionicons name="radio-button-on" size={18} color={colors.primary} />
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text }]}
             value={pickupName}
             onChangeText={setPickupName}
             placeholder="Pickup Location"
-            placeholderTextColor="#78909C"
+            placeholderTextColor={colors.subText}
           />
         </View>
 
-        <View style={styles.divider} />
+        {/* Quick Yaoundé Hub Chips */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 6 }}>
+          <View style={{ flexDirection: 'row', gap: 6, paddingLeft: 26 }}>
+            {YAOUNDE_HUBS.map((hub, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[
+                  styles.hubChip,
+                  { backgroundColor: `${colors.primary}15`, borderColor: `${colors.primary}35` },
+                  pickupName.includes(hub.name) && { backgroundColor: colors.primary, borderColor: colors.primary }
+                ]}
+                onPress={() => setHubPickup(hub)}
+              >
+                <Text style={[styles.hubChipText, { color: pickupName.includes(hub.name) ? '#0B1325' : colors.text }]}>
+                  {hub.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
+        <View style={[styles.divider, { backgroundColor: colors.cardBorder }]} />
 
         <View style={styles.inputRow}>
           <Ionicons name="location-sharp" size={18} color="#FF5252" />
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text }]}
             value={destName}
             onChangeText={setDestName}
             placeholder="Destination"
-            placeholderTextColor="#78909C"
+            placeholderTextColor={colors.subText}
           />
         </View>
+
+        {/* Quick Yaoundé Hub Chips for Destination */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 6 }}>
+          <View style={{ flexDirection: 'row', gap: 6, paddingLeft: 26 }}>
+            {YAOUNDE_HUBS.map((hub, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[
+                  styles.hubChip,
+                  { backgroundColor: '#FF525215', borderColor: '#FF525235' },
+                  destName.includes(hub.name) && { backgroundColor: '#FF5252', borderColor: '#FF5252' }
+                ]}
+                onPress={() => setHubDest(hub)}
+              >
+                <Text style={[styles.hubChipText, { color: destName.includes(hub.name) ? '#FFFFFF' : colors.text }]}>
+                  {hub.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
       </View>
 
       {/* Primary Search Button */}
-      <TouchableOpacity style={styles.searchBtn} onPress={handleSearchSharedRides} disabled={searching}>
+      <TouchableOpacity
+        style={[styles.searchBtn, { backgroundColor: colors.primary }]}
+        onPress={handleSearchSharedRides}
+        disabled={searching}
+      >
         {searching ? (
           <ActivityIndicator color="#0B1325" />
         ) : (
@@ -172,79 +263,149 @@ export default function VoluntaryShareRideScreen() {
       {/* Search Results Display */}
       {searchResults !== null && (
         <View style={styles.resultsContainer}>
-          <Text style={styles.resultsTitle}>
-            {searchResults.length > 0
-              ? `Found ${searchResults.length} Compatible Shared Ride(s)`
-              : 'No Compatible Shared Ride Available Currently'}
-          </Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={[styles.resultsTitle, { color: colors.text, marginBottom: 0 }]}>
+              {searchResults.length > 0
+                ? `Found ${searchResults.length} Compatible Shared Ride(s)`
+                : 'No Compatible Shared Ride Available Currently'}
+            </Text>
+            <TouchableOpacity onPress={handleSearchSharedRides} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="refresh" size={14} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Refresh</Text>
+            </TouchableOpacity>
+          </View>
 
           {searchResults.length > 0 ? (
             searchResults.map((item, index) => (
-              <View key={index} style={styles.matchCard}>
+              <View key={index} style={[styles.matchCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                {/* Header: vehicle info + seats */}
                 <View style={styles.matchBadgeRow}>
-                  <View style={styles.seatsBadge}>
-                    <Ionicons name="person" size={12} color="#00E676" />
-                    <Text style={styles.seatsBadgeText}>{item.available_seats} seat(s) left</Text>
+                  <View style={[styles.seatsBadge, { backgroundColor: `${colors.primary}18` }]}>
+                    <Ionicons name="person" size={12} color={colors.primary} />
+                    <Text style={[styles.seatsBadgeText, { color: colors.primary }]}>
+                      💺 {item.available_seats ?? 0}/{item.total_capacity ?? 4} Places
+                    </Text>
                   </View>
-                  <View style={styles.savingsBadge}>
-                    <Text style={styles.savingsBadgeText}>Save {item.savings_percentage}%</Text>
-                  </View>
+                  {item.is_own_ride ? (
+                    <View style={styles.ownRideBadge}>
+                      <Ionicons name="sparkles" size={12} color="#00E676" />
+                      <Text style={styles.ownRideBadgeText}>Your Ride (Initiator)</Text>
+                    </View>
+                  ) : (item.savings_percentage ?? 0) > 0 ? (
+                    <View style={styles.savingsBadge}>
+                      <Text style={styles.savingsBadgeText}>Save {item.savings_percentage}%</Text>
+                    </View>
+                  ) : null}
                 </View>
 
-                <Text style={styles.matchRoute}>
+                {/* Vehicle Info */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  {item.car_color_hex ? (
+                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: item.car_color_hex, marginRight: 6, borderWidth: 1.5, borderColor: '#FFFFFF' }} />
+                  ) : null}
+                  <Ionicons name="car-sport" size={14} color="#FFD600" style={{ marginRight: 6 }} />
+                  <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+                    {item.car_model
+                      ? `${item.car_color ? item.car_color + ' ' : ''}${item.car_make ? item.car_make + ' ' : ''}${item.car_model}${item.license_plate ? ' \u2022 ' + item.license_plate : ''}`
+                      : (item.category_name || 'Economy') + ' Ride'}
+                  </Text>
+                </View>
+
+                {/* Route */}
+                <Text style={[styles.matchRoute, { color: colors.text }]}>
                   {item.pickup_name} ➔ {item.destination_name}
                 </Text>
 
-                <View style={styles.fareBreakdownBox}>
-                  <View style={styles.fareRow}>
-                    <Text style={styles.fareLabel}>Normal Solo Fare:</Text>
-                    <Text style={styles.soloFareStrike}>{item.normal_solo_fare} FCFA</Text>
+                {/* Driver or Initiator info with Profile Picture */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: `${colors.primary}20`, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+                    {item.initiator_profile_picture_url ? (
+                      <Image source={{ uri: item.initiator_profile_picture_url }} style={{ width: 32, height: 32, borderRadius: 16 }} />
+                    ) : (
+                      <Ionicons name="person" size={16} color={colors.primary} />
+                    )}
                   </View>
-                  <View style={styles.fareRow}>
-                    <Text style={styles.fareLabelBold}>Proportional Shared Fare:</Text>
-                    <Text style={styles.sharedFareHighlight}>{item.proportional_shared_fare} FCFA</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
+                      {item.initiator_name || item.initiator_username || 'Passenger'} <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>(Initiator)</Text>
+                    </Text>
+                    <Text style={{ color: colors.subText, fontSize: 11 }}>
+                      {item.driver_name ? `Driver: ${item.driver_name} (${item.driver_rating ?? '4.9'}★)` : 'Awaiting driver assignment'}
+                    </Text>
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  style={[
-                    styles.joinBtn,
-                    (item.available_seats || 0) <= 0 && styles.joinBtnDisabled,
-                  ]}
-                  onPress={() => handleJoinSharedRide(item)}
-                  disabled={joiningId === item.shared_ride_id || (item.available_seats || 0) <= 0}
-                  pointerEvents={(joiningId === item.shared_ride_id || (item.available_seats || 0) <= 0) ? 'none' : 'auto'}
-                >
-                  {joiningId === item.shared_ride_id ? (
-                    <ActivityIndicator color="#0B1325" />
-                  ) : (
-                    <Text style={styles.joinBtnText}>
-                      {(item.available_seats || 0) <= 0 ? 'Ride Full' : 'Join This Shared Ride'}
-                    </Text>
+                {/* Fare Breakdown */}
+                <View style={[styles.fareBreakdownBox, { backgroundColor: `${colors.cardBorder}30` }]}>
+                  <View style={styles.fareRow}>
+                    <Text style={[styles.fareLabel, { color: colors.subText }]}>Your route: {item.solo_distance_km} km</Text>
+                    <Text style={[styles.fareLabel, { color: colors.subText }]}>{item.total_route_km} km total route</Text>
+                  </View>
+                  {(item.passenger_solo_cost ?? 0) > 0 && (
+                    <View style={styles.fareRow}>
+                      <Text style={[styles.fareLabel, { color: colors.subText }]}>Solo cost:</Text>
+                      <Text style={[styles.soloFareStrike, { color: colors.subText }]}>{Math.round(item.passenger_solo_cost).toLocaleString()} FCFA</Text>
+                    </View>
                   )}
-                </TouchableOpacity>
+                  <View style={styles.fareRow}>
+                    <Text style={[styles.fareLabelBold, { color: colors.text }]}>Your Shared Fare:</Text>
+                    <Text style={[styles.sharedFareHighlight, { color: colors.primary }]}>{Math.round(item.proportional_shared_fare).toLocaleString()} FCFA</Text>
+                  </View>
+                </View>
+
+                {item.is_own_ride ? (
+                  <TouchableOpacity
+                    style={[styles.viewRideBtn, { backgroundColor: `${colors.primary}20`, borderColor: colors.primary }]}
+                    onPress={() => handleJoinSharedRide(item)}
+                  >
+                    <Ionicons name="eye-outline" size={16} color={colors.primary} style={{ marginRight: 6 }} />
+                    <Text style={[styles.viewRideBtnText, { color: colors.primary }]}>
+                      View My Active Ride
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[
+                      styles.joinBtn,
+                      { backgroundColor: colors.primary },
+                      (item.available_seats || 0) <= 0 && styles.joinBtnDisabled,
+                    ]}
+                    onPress={() => handleJoinSharedRide(item)}
+                    disabled={joiningId === item.shared_ride_id || (item.available_seats || 0) <= 0}
+                  >
+                    {joiningId === item.shared_ride_id ? (
+                      <ActivityIndicator color="#0B1325" />
+                    ) : (
+                      <Text style={styles.joinBtnText}>
+                        {(item.available_seats || 0) <= 0
+                          ? 'Ride Full'
+                          : `Join This Ride (${Math.round(item.proportional_shared_fare).toLocaleString()} FCFA)`}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
             ))
           ) : (
             /* Option when NO match exists: Make My Ride Shareable */
-            <View style={styles.noMatchCard}>
-              <Ionicons name="sparkles-outline" size={36} color="#00E676" style={{ alignSelf: 'center', marginBottom: 8 }} />
-              <Text style={styles.noMatchHeading}>Be the First Shareable Passenger!</Text>
-              <Text style={styles.noMatchText}>
+            <View style={[styles.noMatchCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <Ionicons name="sparkles-outline" size={36} color={colors.primary} style={{ alignSelf: 'center', marginBottom: 8 }} />
+              <Text style={[styles.noMatchHeading, { color: colors.text }]}>Be the First Shareable Passenger!</Text>
+              <Text style={[styles.noMatchText, { color: colors.subText }]}>
                 No ride is heading your exact way right now. You can create a new ride and make it shareable so future riders on your route can join you!
               </Text>
 
               <TouchableOpacity
-                style={styles.makeShareableBtn}
+                style={[styles.makeShareableBtn, { backgroundColor: colors.primary }]}
                 onPress={handleMakeShareable}
                 disabled={makeShareableLoading}
               >
                 {makeShareableLoading ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color="#0B1325" />
                 ) : (
                   <>
-                    <Ionicons name="add-circle" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.makeShareableBtnText}>Make My Ride Shareable</Text>
+                    <Ionicons name="add-circle" size={20} color="#0B1325" style={{ marginRight: 8 }} />
+                    <Text style={[styles.makeShareableBtnText, { color: '#0B1325' }]}>Make My Ride Shareable</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -259,42 +420,34 @@ export default function VoluntaryShareRideScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0F1D',
   },
   infoBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 230, 118, 0.1)',
     padding: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(0, 230, 118, 0.3)',
     gap: 12,
     marginBottom: 16,
   },
   infoTitle: {
-    color: '#00E676',
     fontSize: 14,
     fontWeight: '700',
   },
   infoBody: {
-    color: '#90A4AE',
     fontSize: 12,
     marginTop: 2,
   },
   inputCard: {
-    backgroundColor: '#131C31',
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#1E2D4A',
     marginBottom: 16,
   },
   cardHeader: {
-    color: '#ECEFF1',
     fontSize: 14,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   inputRow: {
     flexDirection: 'row',
@@ -304,17 +457,24 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     height: 40,
-    color: '#FFFFFF',
     fontSize: 14,
+  },
+  hubChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  hubChipText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   divider: {
     height: 1,
-    backgroundColor: '#1E2D4A',
     marginVertical: 8,
     marginLeft: 28,
   },
   searchBtn: {
-    backgroundColor: '#00E676',
     height: 50,
     borderRadius: 14,
     flexDirection: 'row',
@@ -331,17 +491,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   resultsTitle: {
-    color: '#ECEFF1',
     fontSize: 15,
     fontWeight: '700',
-    marginBottom: 12,
   },
   matchCard: {
-    backgroundColor: '#131C31',
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#1E2D4A',
     marginBottom: 14,
   },
   matchBadgeRow: {
@@ -352,16 +508,30 @@ const styles = StyleSheet.create({
   seatsBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E2D4A',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
     gap: 4,
   },
   seatsBadgeText: {
-    color: '#00E676',
     fontSize: 12,
     fontWeight: '600',
+  },
+  ownRideBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+    borderWidth: 1,
+    borderColor: '#00E676',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 4,
+  },
+  ownRideBadgeText: {
+    color: '#00E676',
+    fontSize: 11,
+    fontWeight: '700',
   },
   savingsBadge: {
     backgroundColor: '#FF6D00',
@@ -375,13 +545,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   matchRoute: {
-    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 12,
   },
   fareBreakdownBox: {
-    backgroundColor: '#0A0F1D',
     padding: 12,
     borderRadius: 10,
     gap: 6,
@@ -393,26 +561,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   fareLabel: {
-    color: '#78909C',
     fontSize: 13,
   },
   soloFareStrike: {
-    color: '#78909C',
     fontSize: 13,
     textDecorationLine: 'line-through',
   },
   fareLabelBold: {
-    color: '#ECEFF1',
     fontSize: 14,
     fontWeight: '700',
   },
   sharedFareHighlight: {
-    color: '#00E676',
     fontSize: 18,
     fontWeight: '800',
   },
   joinBtn: {
-    backgroundColor: '#00E676',
     height: 44,
     borderRadius: 10,
     justifyContent: 'center',
@@ -426,30 +589,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
+  viewRideBtn: {
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewRideBtnText: {
+    fontWeight: '700',
+    fontSize: 14,
+  },
   noMatchCard: {
-    backgroundColor: '#131C31',
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#1E2D4A',
     alignItems: 'center',
   },
   noMatchHeading: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 6,
     textAlign: 'center',
   },
   noMatchText: {
-    color: '#90A4AE',
     fontSize: 13,
     textAlign: 'center',
     marginBottom: 16,
     lineHeight: 18,
   },
   makeShareableBtn: {
-    backgroundColor: '#29B6F6',
     height: 46,
     borderRadius: 12,
     paddingHorizontal: 20,
@@ -458,7 +628,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   makeShareableBtnText: {
-    color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 15,
   },
