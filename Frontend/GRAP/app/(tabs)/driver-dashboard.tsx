@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../services/api';
+import { useLanguage } from '../../context/LanguageContext';
 
 export default function DriverDashboardScreen() {
+  const { t } = useLanguage();
   const [isOnline, setIsOnline] = useState(true);
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,10 +40,10 @@ export default function DriverDashboardScreen() {
     setAcceptingId(rideId);
     try {
       const accepted = await api.acceptRide(rideId);
-      Alert.alert('Ride Accepted!', `You have accepted ride #${accepted.id}. Proceed to pickup.`);
+      Alert.alert(t('Ride Accepted!'), t('You have accepted ride #{id}. Proceed to pickup.').replace('{id}', String(accepted.id)));
       loadRequests();
     } catch (e: any) {
-      Alert.alert('Accept Error', e.message || 'Could not accept ride');
+      Alert.alert(t('Accept Error'), e.message || t('Could not accept ride'));
     } finally {
       setAcceptingId(null);
     }
@@ -58,9 +60,9 @@ export default function DriverDashboardScreen() {
             color={isOnline ? '#00E676' : '#90A4AE'}
           />
           <View>
-            <Text style={styles.statusLabel}>{isOnline ? 'YOU ARE ONLINE' : 'YOU ARE OFFLINE'}</Text>
+            <Text style={styles.statusLabel}>{t(isOnline ? 'YOU ARE ONLINE' : 'YOU ARE OFFLINE')}</Text>
             <Text style={styles.statusSub}>
-              {isOnline ? 'Receiving incoming ride requests nearby' : 'Go online to start receiving ride requests'}
+              {t(isOnline ? 'Receiving incoming ride requests nearby' : 'Go online to start receiving ride requests')}
             </Text>
           </View>
         </View>
@@ -71,17 +73,17 @@ export default function DriverDashboardScreen() {
       <View style={styles.vehicleCard}>
         <Ionicons name="car-sport" size={24} color="#29B6F6" />
         <View style={{ flex: 1 }}>
-          <Text style={styles.vehicleTitle}>Assigned Vehicle: Toyota Yaris</Text>
-          <Text style={styles.vehicleSub}>Plate: CE-992-AA • Economy Category</Text>
+          <Text style={styles.vehicleTitle}>{t('Assigned Vehicle: Toyota Yaris')}</Text>
+          <Text style={styles.vehicleSub}>{t('Plate: CE-992-AA • Economy Category')}</Text>
         </View>
         <View style={styles.verifiedBadge}>
-          <Text style={styles.verifiedBadgeText}>VERIFIED</Text>
+          <Text style={styles.verifiedBadgeText}>{t('VERIFIED')}</Text>
         </View>
       </View>
 
       {/* Incoming Requests Feed Header */}
       <View style={styles.feedHeader}>
-        <Text style={styles.feedTitle}>Incoming Ride Requests</Text>
+        <Text style={styles.feedTitle}>{t('Incoming Ride Requests')}</Text>
         <TouchableOpacity style={styles.refreshBtn} onPress={loadRequests}>
           <Ionicons name="refresh" size={18} color="#29B6F6" />
         </TouchableOpacity>
@@ -99,7 +101,7 @@ export default function DriverDashboardScreen() {
               <Text style={styles.fareTag}>{req.estimated_fare} FCFA</Text>
             </View>
 
-            <Text style={styles.passengerText}>Passenger: {req.passenger_name || 'Passenger'}</Text>
+            <Text style={styles.passengerText}>{t('Passenger:')} {req.passenger_name || t('Passenger')}</Text>
 
             <View style={styles.routeBox}>
               <View style={styles.routeItem}>
@@ -122,7 +124,7 @@ export default function DriverDashboardScreen() {
               ) : (
                 <>
                   <Ionicons name="checkmark-circle" size={18} color="#0B1325" style={{ marginRight: 6 }} />
-                  <Text style={styles.acceptBtnText}>Accept Ride Request</Text>
+                  <Text style={styles.acceptBtnText}>{t('Accept Ride Request')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -131,9 +133,9 @@ export default function DriverDashboardScreen() {
       ) : (
         <View style={styles.emptyCard}>
           <Ionicons name="car-outline" size={40} color="#546E7A" style={{ alignSelf: 'center', marginBottom: 8 }} />
-          <Text style={styles.emptyTitle}>No Pending Requests</Text>
+          <Text style={styles.emptyTitle}>{t('No Pending Requests')}</Text>
           <Text style={styles.emptySub}>
-            New requests in your area will appear here automatically when passengers place orders.
+            {t('New requests in your area will appear here automatically when passengers place orders.')}
           </Text>
         </View>
       )}

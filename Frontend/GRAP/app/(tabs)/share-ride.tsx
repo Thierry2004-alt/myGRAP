@@ -86,10 +86,12 @@ export default function VoluntaryShareRideScreen() {
       });
 
       Alert.alert(
-        'Joined Shared Ride!',
-        `You joined ride #${sharedItem.primary_ride_id}.\nYour allocated fare: ${Number(res.allocated_fare || sharedItem.proportional_shared_fare).toLocaleString()} FCFA`,
+        t('Joined Shared Ride!'),
+        t('You joined ride #{id}.\nYour allocated fare: {fare} FCFA')
+          .replace('{id}', String(sharedItem.primary_ride_id))
+          .replace('{fare}', Number(res.allocated_fare || sharedItem.proportional_shared_fare).toLocaleString()),
         [{ 
-          text: 'Go to Active Ride', 
+          text: t('Go to Active Ride'),
           onPress: () => router.push({
             pathname: '/rides',
             params: {
@@ -111,7 +113,7 @@ export default function VoluntaryShareRideScreen() {
     } catch (e: any) {
       const msg = e.message || 'Could not join shared ride';
       console.error('Join shared ride error:', msg);
-      Alert.alert('Error Joining', msg);
+      Alert.alert(t('Error Joining'), t(msg));
     } finally {
       setJoiningId(null);
     }
@@ -135,14 +137,14 @@ export default function VoluntaryShareRideScreen() {
 
       const res = await api.makeRideShareable(newRide.id);
       Alert.alert(
-        'Ride Made Shareable!',
-        `Your ride #${newRide.id} is now available for compatible passengers to join on route.`,
-        [{ text: 'View Status', onPress: () => router.push({ pathname: '/rides', params: { ride_id: String(newRide.id), pay: 'CASH', pickup: pickupName, dest: destName } }) }]
+        t('Ride Made Shareable!'),
+        t('Your ride #{id} is now available for compatible passengers to join on route.').replace('{id}', String(newRide.id)),
+        [{ text: t('View Status'), onPress: () => router.push({ pathname: '/rides', params: { ride_id: String(newRide.id), pay: 'CASH', pickup: pickupName, dest: destName } }) }]
       );
     } catch (e: any) {
       const msg = e.message || 'Failed to make ride shareable';
       console.error('Make shareable error:', msg);
-      Alert.alert('Error', msg);
+      Alert.alert(t('Error'), t(msg));
     } finally {
       setMakeShareableLoading(false);
     }
@@ -166,16 +168,16 @@ export default function VoluntaryShareRideScreen() {
       <View style={[styles.infoBanner, { backgroundColor: `${colors.primary}15`, borderColor: `${colors.primary}40` }]}>
         <Ionicons name="people" size={24} color={colors.primary} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.infoTitle, { color: colors.primary }]}>Voluntary Dynamic Ride-Sharing</Text>
+          <Text style={[styles.infoTitle, { color: colors.primary }]}>{t('Voluntary Dynamic Ride-Sharing')}</Text>
           <Text style={[styles.infoBody, { color: colors.subText }]}>
-            GRAP matches passengers with compatible routes. Fares are split fairly proportional to distance!
+            {t('GRAP matches passengers with compatible routes. Fares are split fairly proportional to distance!')}
           </Text>
         </View>
       </View>
 
       {/* Location Input Card */}
       <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-        <Text style={[styles.cardHeader, { color: colors.text }]}>Enter Desired Route</Text>
+        <Text style={[styles.cardHeader, { color: colors.text }]}>{t('Enter Desired Route')}</Text>
         
         <View style={styles.inputRow}>
           <Ionicons name="radio-button-on" size={18} color={colors.primary} />
@@ -183,7 +185,7 @@ export default function VoluntaryShareRideScreen() {
             style={[styles.input, { color: colors.text }]}
             value={pickupName}
             onChangeText={setPickupName}
-            placeholder="Pickup Location"
+            placeholder={t('Pickup Location')}
             placeholderTextColor={colors.subText}
           />
         </View>
@@ -217,7 +219,7 @@ export default function VoluntaryShareRideScreen() {
             style={[styles.input, { color: colors.text }]}
             value={destName}
             onChangeText={setDestName}
-            placeholder="Destination"
+            placeholder={t('Destination')}
             placeholderTextColor={colors.subText}
           />
         </View>
@@ -255,7 +257,7 @@ export default function VoluntaryShareRideScreen() {
         ) : (
           <>
             <Ionicons name="search" size={20} color="#0B1325" style={{ marginRight: 8 }} />
-            <Text style={styles.searchBtnText}>Search Compatible Shared Rides</Text>
+            <Text style={styles.searchBtnText}>{t('Search Compatible Shared Rides')}</Text>
           </>
         )}
       </TouchableOpacity>
@@ -267,11 +269,11 @@ export default function VoluntaryShareRideScreen() {
             <Text style={[styles.resultsTitle, { color: colors.text, marginBottom: 0 }]}>
               {searchResults.length > 0
                 ? `Found ${searchResults.length} Compatible Shared Ride(s)`
-                : 'No Compatible Shared Ride Available Currently'}
+                : t('No Compatible Shared Ride Available Currently')}
             </Text>
             <TouchableOpacity onPress={handleSearchSharedRides} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Ionicons name="refresh" size={14} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Refresh</Text>
+              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>{t('Refresh')}</Text>
             </TouchableOpacity>
           </View>
 
@@ -289,11 +291,11 @@ export default function VoluntaryShareRideScreen() {
                   {item.is_own_ride ? (
                     <View style={styles.ownRideBadge}>
                       <Ionicons name="sparkles" size={12} color="#00E676" />
-                      <Text style={styles.ownRideBadgeText}>Your Ride (Initiator)</Text>
+                      <Text style={styles.ownRideBadgeText}>{t('Your Ride (Initiator)')}</Text>
                     </View>
                   ) : (item.savings_percentage ?? 0) > 0 ? (
                     <View style={styles.savingsBadge}>
-                      <Text style={styles.savingsBadgeText}>Save {item.savings_percentage}%</Text>
+                      <Text style={styles.savingsBadgeText}>{t('Save {percentage}%').replace('{percentage}', String(item.savings_percentage))}</Text>
                     </View>
                   ) : null}
                 </View>
@@ -330,7 +332,7 @@ export default function VoluntaryShareRideScreen() {
                       {item.initiator_name || item.initiator_username || 'Passenger'} <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>(Initiator)</Text>
                     </Text>
                     <Text style={{ color: colors.subText, fontSize: 11 }}>
-                      {item.driver_name ? `Driver: ${item.driver_name} (${item.driver_rating ?? '4.9'}★)` : 'Awaiting driver assignment'}
+                    {item.driver_name ? `${t('Driver:')} ${item.driver_name} (${item.driver_rating ?? '4.9'}★)` : t('Awaiting driver assignment')}
                     </Text>
                   </View>
                 </View>
@@ -343,12 +345,12 @@ export default function VoluntaryShareRideScreen() {
                   </View>
                   {(item.passenger_solo_cost ?? 0) > 0 && (
                     <View style={styles.fareRow}>
-                      <Text style={[styles.fareLabel, { color: colors.subText }]}>Solo cost:</Text>
+                      <Text style={[styles.fareLabel, { color: colors.subText }]}>{t('Solo cost:')}</Text>
                       <Text style={[styles.soloFareStrike, { color: colors.subText }]}>{Math.round(item.passenger_solo_cost).toLocaleString()} FCFA</Text>
                     </View>
                   )}
                   <View style={styles.fareRow}>
-                    <Text style={[styles.fareLabelBold, { color: colors.text }]}>Your Shared Fare:</Text>
+                    <Text style={[styles.fareLabelBold, { color: colors.text }]}>{t('Your Shared Fare:')}</Text>
                     <Text style={[styles.sharedFareHighlight, { color: colors.primary }]}>{Math.round(item.proportional_shared_fare).toLocaleString()} FCFA</Text>
                   </View>
                 </View>
@@ -360,7 +362,7 @@ export default function VoluntaryShareRideScreen() {
                   >
                     <Ionicons name="eye-outline" size={16} color={colors.primary} style={{ marginRight: 6 }} />
                     <Text style={[styles.viewRideBtnText, { color: colors.primary }]}>
-                      View My Active Ride
+                      {t('View My Active Ride')}
                     </Text>
                   </TouchableOpacity>
                 ) : (
@@ -378,8 +380,8 @@ export default function VoluntaryShareRideScreen() {
                     ) : (
                       <Text style={styles.joinBtnText}>
                         {(item.available_seats || 0) <= 0
-                          ? 'Ride Full'
-                          : `Join This Ride (${Math.round(item.proportional_shared_fare).toLocaleString()} FCFA)`}
+                          ? t('Ride Full')
+                          : `${t('Join This Ride')} (${Math.round(item.proportional_shared_fare).toLocaleString()} FCFA)`}
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -390,9 +392,9 @@ export default function VoluntaryShareRideScreen() {
             /* Option when NO match exists: Make My Ride Shareable */
             <View style={[styles.noMatchCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <Ionicons name="sparkles-outline" size={36} color={colors.primary} style={{ alignSelf: 'center', marginBottom: 8 }} />
-              <Text style={[styles.noMatchHeading, { color: colors.text }]}>Be the First Shareable Passenger!</Text>
+              <Text style={[styles.noMatchHeading, { color: colors.text }]}>{t('Be the First Shareable Passenger!')}</Text>
               <Text style={[styles.noMatchText, { color: colors.subText }]}>
-                No ride is heading your exact way right now. You can create a new ride and make it shareable so future riders on your route can join you!
+                {t('No ride is heading your exact way right now. You can create a new ride and make it shareable so future riders on your route can join you!')}
               </Text>
 
               <TouchableOpacity
@@ -405,7 +407,7 @@ export default function VoluntaryShareRideScreen() {
                 ) : (
                   <>
                     <Ionicons name="add-circle" size={20} color="#0B1325" style={{ marginRight: 8 }} />
-                    <Text style={[styles.makeShareableBtnText, { color: '#0B1325' }]}>Make My Ride Shareable</Text>
+                    <Text style={[styles.makeShareableBtnText, { color: '#0B1325' }]}>{t('Make My Ride Shareable')}</Text>
                   </>
                 )}
               </TouchableOpacity>

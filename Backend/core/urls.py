@@ -2,13 +2,13 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from core.views import (
     CustomTokenObtainPairView, RegisterView, CurrentUserView,
-    RequestEmailVerificationView, VerifyEmailView, GroqPlaceRecommendationView,
+    RequestEmailVerificationView, VerifyEmailView, GroqPlaceRecommendationView, PlaceListView,
     RideCategoryListView, EstimateFareView, RequestRideView,
     PassengerMyRidesView, CancelRideView,
     SearchSharedRidesView, JoinSharedRideView, SharedRideStatusView, MySharedRidesView, ConfirmSharedPaymentView, MakeRideShareableView,
     ConfirmCashPaymentView, ConfirmDigitalPaymentView, RateDriverView, DriverStatusView, DriverRideFeedView,
     InitiateCampayPaymentView, CheckCampayPaymentStatusView,
-    DriverAcceptRideView, DriverUpdateRideStatusView, DriverEarningsView,
+    DriverActiveRideView, DriverAcceptRideView, DriverUpdateRideStatusView, DriverEarningsView,
     WithdrawalRequestView, DriverAIDemandRecommendationsView,
     AdminDriverVerificationView, AdminVehicleVerificationView, AdminSystemMetricsView, DriverProposalsView
 )
@@ -22,6 +22,7 @@ urlpatterns = [
     path('auth/verification/request/', RequestEmailVerificationView.as_view(), name='request_email_verification'),
     path('auth/verification/verify/', VerifyEmailView.as_view(), name='verify_email'),
     path('ai/place-recommendation/', GroqPlaceRecommendationView.as_view(), name='groq_place_recommendation'),
+    path('places/', PlaceListView.as_view(), name='places_list'),
 
     # Ride Categories & Estimation & Rides
     path('categories/', RideCategoryListView.as_view(), name='categories_list'),
@@ -47,6 +48,7 @@ urlpatterns = [
 
     # Driver Actions
     path('driver/status/', DriverStatusView.as_view(), name='driver_status'),
+    path('driver/active-ride/', DriverActiveRideView.as_view(), name='driver_active_ride'),
     path('driver/ride-requests/', DriverRideFeedView.as_view(), name='driver_ride_feed'),
     path('driver/accept-ride/<int:ride_id>/', DriverAcceptRideView.as_view(), name='driver_accept_ride'),
     path('driver/update-ride/<int:ride_id>/', DriverUpdateRideStatusView.as_view(), name='driver_update_ride'),

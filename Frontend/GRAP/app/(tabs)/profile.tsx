@@ -105,11 +105,11 @@ export default function PassengerProfileScreen() {
     }
     setEditingPlace(null);
     setTempAddressInput('');
-    Alert.alert('Saved Place Updated', 'Your custom address has been saved successfully!');
+    Alert.alert(t('Saved Place Updated'), t('Your custom address has been saved successfully!'));
   };
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to log out of GRAP?', [
+    Alert.alert(t('Logout'), t('Are you sure you want to log out of GRAP?'), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Logout',
@@ -123,7 +123,7 @@ export default function PassengerProfileScreen() {
   };
 
   const handleSOSConfig = () => {
-    Alert.alert('Emergency Contact / SOS', 'Emergency contact set to: +237 670 00 99 88.\nIn case of emergency, tap SOS button to send live location to contacts.');
+    Alert.alert(t('Emergency Contact / SOS'), t('Emergency contact set to: +237 670 00 99 88.\nIn case of emergency, tap SOS button to send live location to contacts.'));
   };
 
   const openProfileEditor = () => {
@@ -139,7 +139,7 @@ export default function PassengerProfileScreen() {
 
   const saveProfile = async () => {
     if (!profileForm.first_name.trim() || !profileForm.last_name.trim() || !profileForm.email.trim()) {
-      Alert.alert('Incomplete profile', 'First name, last name, and email are required.');
+      Alert.alert(t('Incomplete profile'), t('First name, last name, and email are required.'));
       return;
     }
     setProfileSaving(true);
@@ -151,9 +151,9 @@ export default function PassengerProfileScreen() {
         email: profileForm.email.trim(),
       });
       setProfileEditorVisible(false);
-      Alert.alert('Profile updated', 'Your profile details were saved successfully.');
+      Alert.alert(t('Profile updated'), t('Your profile details were saved successfully.'));
     } catch (error: any) {
-      Alert.alert('Could not save profile', error.message || 'Please try again.');
+      Alert.alert(t('Could not save profile'), error.message ? t(error.message) : t('Please try again.'));
     } finally {
       setProfileSaving(false);
     }
@@ -164,9 +164,9 @@ export default function PassengerProfileScreen() {
     try {
       await requestEmailVerification();
       setVerificationVisible(true);
-      Alert.alert('Code sent', `We sent a 6-digit PIN to ${user?.email}.`);
+      Alert.alert(t('Code sent'), t('We sent a 6-digit PIN to {email}.').replace('{email}', user?.email || ''));
     } catch (error: any) {
-      Alert.alert('Could not send code', error.message || 'Please try again.');
+      Alert.alert(t('Could not send code'), error.message ? t(error.message) : t('Please try again.'));
     } finally {
       setVerificationLoading(false);
     }
@@ -175,7 +175,7 @@ export default function PassengerProfileScreen() {
   const confirmVerification = async () => {
     const normalizedCode = verificationCode.replace(/\D/g, '').slice(0, 6);
     if (!/^\d{6}$/.test(normalizedCode)) {
-      Alert.alert('Invalid PIN', 'Enter the 6-digit code from your email.');
+      Alert.alert(t('Invalid PIN'), t('Enter the 6-digit code from your email.'));
       return;
     }
     setVerificationLoading(true);
@@ -183,9 +183,9 @@ export default function PassengerProfileScreen() {
       await verifyEmail(normalizedCode);
       setVerificationVisible(false);
       setVerificationCode('');
-      Alert.alert('Account verified', 'Your email has been verified successfully.');
+      Alert.alert(t('Account verified'), t('Your email has been verified successfully.'));
     } catch (error: any) {
-      Alert.alert('Verification failed', error.message || 'Check the PIN and try again.');
+      Alert.alert(t('Verification failed'), error.message ? t(error.message) : t('Check the PIN and try again.'));
     } finally {
       setVerificationLoading(false);
     }
@@ -216,7 +216,7 @@ export default function PassengerProfileScreen() {
 
         <TouchableOpacity style={[styles.editProfileBtn, { backgroundColor: colors.inputBg }]} onPress={openProfileEditor}>
           <Ionicons name="create-outline" size={16} color={colors.primary} />
-          <Text style={[styles.editProfileBtnText, { color: colors.primary }]}>Edit Profile</Text>
+          <Text style={[styles.editProfileBtnText, { color: colors.primary }]}>{t('Edit Profile')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -224,8 +224,8 @@ export default function PassengerProfileScreen() {
         <View style={[styles.verificationCard, { backgroundColor: `${colors.accent}18`, borderColor: `${colors.accent}80` }]}>
           <View style={[styles.verificationIcon, { backgroundColor: `${colors.accent}25` }]}><Ionicons name="mail-unread-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.verificationTitle, { color: colors.text }]}>Verify your email</Text>
-            <Text style={[styles.verificationSub, { color: colors.subText }]}>Confirm your email to protect your account and unlock trusted ride features.</Text>
+            <Text style={[styles.verificationTitle, { color: colors.text }]}>{t('Verify your email')}</Text>
+            <Text style={[styles.verificationSub, { color: colors.subText }]}>{t('Confirm your email to protect your account and unlock trusted ride features.')}</Text>
             <TouchableOpacity style={[styles.verifyButton, { backgroundColor: colors.accent }]} onPress={sendVerificationCode} disabled={verificationLoading}>
               <Text style={styles.verifyButtonText}>{verificationLoading ? 'Sending...' : 'Send verification PIN'}</Text>
             </TouchableOpacity>
@@ -247,7 +247,7 @@ export default function PassengerProfileScreen() {
         >
           <Ionicons name="trophy" size={24} color="#FFD600" />
           <Text style={styles.statNumber}>{loyaltyPoints.toLocaleString()} Pts</Text>
-          <Text style={[styles.statLabel, { color: colors.subText }]}>Loyalty Points</Text>
+          <Text style={[styles.statLabel, { color: colors.subText }]}>{t('Loyalty Points')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -262,12 +262,12 @@ export default function PassengerProfileScreen() {
         >
           <Ionicons name="leaf" size={24} color={colors.primary} />
           <Text style={[styles.statNumber, { color: colors.primary }]}>{sharedSavings.toLocaleString()} FCFA</Text>
-          <Text style={[styles.statLabel, { color: colors.subText }]}>Shared Ride Savings</Text>
+          <Text style={[styles.statLabel, { color: colors.subText }]}>{t('Shared Ride Savings')}</Text>
         </TouchableOpacity>
       </View>
 
       {/* MODULE 3: USER-DEFINED SAVED FAVORITE PLACES MODULE */}
-      <Text style={[styles.sectionTitle, { color: colors.subText }]}>Saved Places (Lieux Favoris)</Text>
+      <Text style={[styles.sectionTitle, { color: colors.subText }]}>{t('Saved Places (Lieux Favoris)')}</Text>
       <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         {/* Set Home Address */}
         <TouchableOpacity
@@ -281,7 +281,7 @@ export default function PassengerProfileScreen() {
             <Ionicons name="home" size={18} color={colors.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.favTitle, { color: colors.text }]}>Home Address</Text>
+            <Text style={[styles.favTitle, { color: colors.text }]}>{t('Home Address')}</Text>
             <Text style={[styles.favSub, { color: homeAddress.includes('Tap') ? colors.primary : colors.subText }]}>{homeAddress}</Text>
           </View>
           <Ionicons name="create-outline" size={18} color={colors.primary} />
@@ -301,7 +301,7 @@ export default function PassengerProfileScreen() {
             <Ionicons name="briefcase" size={18} color={colors.secondary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.favTitle, { color: colors.text }]}>Work Address</Text>
+            <Text style={[styles.favTitle, { color: colors.text }]}>{t('Work Address')}</Text>
             <Text style={[styles.favSub, { color: workAddress.includes('Tap') ? colors.secondary : colors.subText }]}>{workAddress}</Text>
           </View>
           <Ionicons name="create-outline" size={18} color={colors.secondary} />
@@ -309,14 +309,14 @@ export default function PassengerProfileScreen() {
       </View>
 
       {/* MODULE 4: DEFAULT PAYMENT METHODS MODULE */}
-      <Text style={[styles.sectionTitle, { color: colors.subText }]}>Default Payment Method (Paiement)</Text>
+      <Text style={[styles.sectionTitle, { color: colors.subText }]}>{t('Default Payment Method (Paiement)')}</Text>
       <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <TouchableOpacity style={styles.settingRow} onPress={() => { setDefaultPayment('MTN_MOMO'); setEditingPayment('MTN'); setPaymentInput(paymentNumbers.mtn); }}>
           <View style={[styles.payIconBadge, { backgroundColor: '#FFCC00' }]}>
             <Ionicons name="wallet-sharp" size={14} color="#000" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>MTN Mobile Money</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('MTN Mobile Money')}</Text>
             <Text style={[styles.settingSub, { color: colors.subText }]}>{paymentNumbers.mtn ? `Linked: ${paymentNumbers.mtn}` : 'Tap to add your MTN number'}</Text>
           </View>
           {defaultPayment === 'MTN_MOMO' && <Ionicons name="checkmark-circle" size={20} color="#FFCC00" />}
@@ -329,7 +329,7 @@ export default function PassengerProfileScreen() {
             <Ionicons name="card-sharp" size={14} color="#FFF" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Orange Money</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Orange Money')}</Text>
             <Text style={[styles.settingSub, { color: colors.subText }]}>{paymentNumbers.orange ? `Linked: ${paymentNumbers.orange}` : 'Tap to add your Orange number'}</Text>
           </View>
           {defaultPayment === 'ORANGE_MONEY' && <Ionicons name="checkmark-circle" size={20} color="#FF6600" />}
@@ -342,20 +342,20 @@ export default function PassengerProfileScreen() {
             <Ionicons name="cash-sharp" size={14} color="#0B1325" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Cash Payment (Espèces OTP 4-PIN)</Text>
-            <Text style={[styles.settingSub, { color: colors.subText }]}>Generate 4-digit verification code</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Cash Payment (Espèces OTP 4-PIN)')}</Text>
+            <Text style={[styles.settingSub, { color: colors.subText }]}>{t('Generate 4-digit verification code')}</Text>
           </View>
           {defaultPayment === 'CASH' && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
         </TouchableOpacity>
       </View>
 
       {/* MODULE 5: RIDE PREFERENCES MODULE */}
-      <Text style={[styles.sectionTitle, { color: colors.subText }]}>Ride Preferences (Préférences)</Text>
+      <Text style={[styles.sectionTitle, { color: colors.subText }]}>{t('Ride Preferences (Préférences)')}</Text>
       <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Voluntary Shared Ride Opt-In</Text>
-            <Text style={[styles.settingSub, { color: colors.subText }]}>Auto-suggest route matching to save up to 40%</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Voluntary Shared Ride Opt-In')}</Text>
+            <Text style={[styles.settingSub, { color: colors.subText }]}>{t('Auto-suggest route matching to save up to 40%')}</Text>
           </View>
           <Switch value={autoRideShare} onValueChange={setAutoRideShare} trackColor={{ false: '#334155', true: colors.primary }} />
         </View>
@@ -364,8 +364,8 @@ export default function PassengerProfileScreen() {
 
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Silent Trip Preference</Text>
-            <Text style={[styles.settingSub, { color: colors.subText }]}>Request quiet ride from driver</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Silent Trip Preference')}</Text>
+            <Text style={[styles.settingSub, { color: colors.subText }]}>{t('Request quiet ride from driver')}</Text>
           </View>
           <Switch value={silentRide} onValueChange={setSilentRide} trackColor={{ false: '#334155', true: colors.primary }} />
         </View>
@@ -374,20 +374,20 @@ export default function PassengerProfileScreen() {
 
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Air Conditioned Vehicle</Text>
-            <Text style={[styles.settingSub, { color: colors.subText }]}>Prefer AC equipped cars</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Air Conditioned Vehicle')}</Text>
+            <Text style={[styles.settingSub, { color: colors.subText }]}>{t('Prefer AC equipped cars')}</Text>
           </View>
           <Switch value={airConditioned} onValueChange={setAirConditioned} trackColor={{ false: '#334155', true: colors.primary }} />
         </View>
       </View>
 
       {/* MODULE 6: APP CUSTOMIZATION MODULE (THEME & LANGUAGE) */}
-      <Text style={[styles.sectionTitle, { color: colors.subText }]}>Appearance & Language</Text>
+      <Text style={[styles.sectionTitle, { color: colors.subText }]}>{t('Appearance & Language')}</Text>
       <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Dark Mode</Text>
-            <Text style={[styles.settingSub, { color: colors.subText }]}>High contrast dark design system</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Dark Mode')}</Text>
+            <Text style={[styles.settingSub, { color: colors.subText }]}>{t('High contrast dark design system')}</Text>
           </View>
           <Switch value={isDark} onValueChange={toggleTheme} trackColor={{ false: '#334155', true: colors.primary }} />
         </View>
@@ -396,7 +396,7 @@ export default function PassengerProfileScreen() {
 
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Language</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Language')}</Text>
             <Text style={[styles.settingSub, { color: colors.subText }]}>Currently: {language === 'en' ? 'English' : 'Français'}</Text>
           </View>
 
@@ -407,28 +407,28 @@ export default function PassengerProfileScreen() {
       </View>
 
       {/* MODULE 7: ACCOUNT SAFETY & EMERGENCY CONTACT (SOS) */}
-      <Text style={[styles.sectionTitle, { color: colors.subText }]}>Safety & Security (Sécurité)</Text>
+      <Text style={[styles.sectionTitle, { color: colors.subText }]}>{t('Safety & Security (Sécurité)')}</Text>
       <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <TouchableOpacity style={styles.settingRow} onPress={handleSOSConfig}>
           <View style={[styles.favIconBadge, { backgroundColor: 'rgba(255, 82, 82, 0.15)' }]}>
             <Ionicons name="shield-checkmark" size={18} color="#FF5252" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Emergency Contacts & SOS</Text>
-            <Text style={[styles.settingSub, { color: colors.subText }]}>Set trusted contacts for live ride tracking</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Emergency Contacts & SOS')}</Text>
+            <Text style={[styles.settingSub, { color: colors.subText }]}>{t('Set trusted contacts for live ride tracking')}</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.subText} />
         </TouchableOpacity>
 
         <View style={[styles.divider, { backgroundColor: colors.cardBorder }]} />
 
-        <TouchableOpacity style={styles.settingRow} onPress={() => Alert.alert('Security', 'Change account password...')}>
+        <TouchableOpacity style={styles.settingRow} onPress={() => Alert.alert(t('Security'), t('Change account password...'))}>
           <View style={[styles.favIconBadge, { backgroundColor: 'rgba(41, 182, 246, 0.15)' }]}>
             <Ionicons name="lock-closed" size={18} color={colors.secondary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Password & Security</Text>
-            <Text style={[styles.settingSub, { color: colors.subText }]}>Update password and 2FA settings</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('Password & Security')}</Text>
+            <Text style={[styles.settingSub, { color: colors.subText }]}>{t('Update password and 2FA settings')}</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.subText} />
         </TouchableOpacity>
@@ -448,9 +448,9 @@ export default function PassengerProfileScreen() {
       )}
 
       {/* MODULE 8: SUPPORT & LOGOUT ACTIONS */}
-      <TouchableOpacity style={[styles.supportBtn, { backgroundColor: colors.inputBg }]} onPress={() => Alert.alert('Support', 'Contacting GRAP 24/7 Customer Support (+237 670 00 00 00)...')}>
+      <TouchableOpacity style={[styles.supportBtn, { backgroundColor: colors.inputBg }]} onPress={() => Alert.alert(t('Support'), t('Contacting GRAP 24/7 Customer Support (+237 670 00 00 00)...'))}>
         <Ionicons name="help-buoy" size={18} color={colors.primary} />
-        <Text style={[styles.supportBtnText, { color: colors.primary }]}>Help & Support</Text>
+        <Text style={[styles.supportBtnText, { color: colors.primary }]}>{t('Help & Support')}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
@@ -483,7 +483,7 @@ export default function PassengerProfileScreen() {
 
               <TextInput
                 style={[styles.addressInput, { backgroundColor: colors.inputBg, color: colors.text }]}
-                placeholder="e.g. Carrefour Jouvence, Biyem-Assi"
+                placeholder={t('e.g. Carrefour Jouvence, Biyem-Assi')}
                 placeholderTextColor={colors.subText}
                 value={tempAddressInput}
                 onChangeText={setTempAddressInput}
@@ -491,7 +491,7 @@ export default function PassengerProfileScreen() {
               />
 
               <TouchableOpacity style={[styles.saveAddressBtn, { backgroundColor: colors.primary }]} onPress={handleSaveCustomAddress}>
-                <Text style={styles.saveAddressBtnText}>Save Address</Text>
+                <Text style={styles.saveAddressBtnText}>{t('Save Address')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -506,10 +506,10 @@ export default function PassengerProfileScreen() {
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Add {editingPayment === 'MTN' ? 'MTN Mobile Money' : 'Orange Money'} number</Text>
                 <TouchableOpacity onPress={() => setEditingPayment(null)}><Ionicons name="close" size={22} color={colors.text} /></TouchableOpacity>
               </View>
-              <Text style={[styles.modalSubText, { color: colors.subText }]}>Enter the number you use for payments. It stays private on your account.</Text>
-              <TextInput style={[styles.addressInput, { backgroundColor: colors.inputBg, color: colors.text }]} placeholder="e.g. +237 6 70 00 00 00" placeholderTextColor={colors.subText} keyboardType="phone-pad" value={paymentInput} onChangeText={setPaymentInput} autoFocus />
+              <Text style={[styles.modalSubText, { color: colors.subText }]}>{t('Enter the number you use for payments. It stays private on your account.')}</Text>
+              <TextInput style={[styles.addressInput, { backgroundColor: colors.inputBg, color: colors.text }]} placeholder={t('e.g. +237 6 70 00 00 00')} placeholderTextColor={colors.subText} keyboardType="phone-pad" value={paymentInput} onChangeText={setPaymentInput} autoFocus />
               <TouchableOpacity style={[styles.saveAddressBtn, { backgroundColor: colors.primary }]} onPress={async () => { const next = { ...paymentNumbers, [editingPayment === 'MTN' ? 'mtn' : 'orange']: paymentInput.trim() }; setPaymentNumbers(next); await paymentStorage.save(user?.id, next); setEditingPayment(null); }}>
-                <Text style={styles.saveAddressBtnText}>Save number</Text>
+                <Text style={styles.saveAddressBtnText}>{t('Save number')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -520,11 +520,11 @@ export default function PassengerProfileScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.profileEditorCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }] }>
             <View style={styles.modalHeader}>
-              <View style={styles.editorHeading}><View style={[styles.editorAvatar, { backgroundColor: `${colors.primary}20` }]}><Text style={[styles.editorAvatarText, { color: colors.primary }]}>{(user?.username || 'U').charAt(0).toUpperCase()}</Text></View><View><Text style={[styles.modalTitle, { color: colors.text }]}>Edit profile</Text><Text style={[styles.modalSubText, { color: colors.subText }]}>Update your personal details</Text></View></View>
+              <View style={styles.editorHeading}><View style={[styles.editorAvatar, { backgroundColor: `${colors.primary}20` }]}><Text style={[styles.editorAvatarText, { color: colors.primary }]}>{(user?.username || 'U').charAt(0).toUpperCase()}</Text></View><View><Text style={[styles.modalTitle, { color: colors.text }]}>{t('Edit profile')}</Text><Text style={[styles.modalSubText, { color: colors.subText }]}>{t('Update your personal details')}</Text></View></View>
               <TouchableOpacity onPress={() => setProfileEditorVisible(false)} style={styles.editorClose}><Ionicons name="close" size={20} color={colors.text} /></TouchableOpacity>
             </View>
-             <View style={[styles.usernameBanner, { backgroundColor: colors.inputBg }]}><Ionicons name="at-outline" size={18} color={colors.primary} /><View><Text style={[styles.usernameLabel, { color: colors.subText }]}>Username</Text><Text style={[styles.usernameValue, { color: colors.text }]}>{user?.username || 'GRAP user'}</Text></View><Ionicons name="lock-closed-outline" size={15} color={colors.subText} /></View>
-             <Text style={[styles.editorHint, { color: colors.subText }]}>Your username is your unique account ID and cannot be changed here.</Text>
+             <View style={[styles.usernameBanner, { backgroundColor: colors.inputBg }]}><Ionicons name="at-outline" size={18} color={colors.primary} /><View><Text style={[styles.usernameLabel, { color: colors.subText }]}>{t('Username')}</Text><Text style={[styles.usernameValue, { color: colors.text }]}>{user?.username || 'GRAP user'}</Text></View><Ionicons name="lock-closed-outline" size={15} color={colors.subText} /></View>
+             <Text style={[styles.editorHint, { color: colors.subText }]}>{t('Your username is your unique account ID and cannot be changed here.')}</Text>
              <TouchableOpacity style={[styles.editorField, { justifyContent: 'center' }]} onPress={async () => {
                const result = await ImagePicker.launchImageLibraryAsync({
                  mediaTypes: ['images'],
@@ -539,20 +539,20 @@ export default function PassengerProfileScreen() {
                  setProfileForm((current) => ({ ...current, profile_picture_url: uri }));
                }
              }}>
-               <Text style={[styles.editorLabel, { color: colors.text }]}>Profile Picture</Text>
+               <Text style={[styles.editorLabel, { color: colors.text }]}>{t('Profile Picture')}</Text>
                {profileForm.profile_picture_url ? (
                  <Image source={{ uri: profileForm.profile_picture_url }} style={[styles.profilePicturePreview, { borderColor: colors.cardBorder }]} />
                ) : (
                  <View style={[styles.profilePicturePlaceholder, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
                    <Ionicons name="image-outline" size={24} color={colors.subText} />
-                   <Text style={[styles.profilePicturePlaceholderText, { color: colors.subText }]}>Tap to choose photo</Text>
+                   <Text style={[styles.profilePicturePlaceholderText, { color: colors.subText }]}>{t('Tap to choose photo')}</Text>
                  </View>
                )}
              </TouchableOpacity>
              {([['first_name', 'First name'], ['last_name', 'Last name'], ['email', 'Email address'], ['phone_number', 'Phone number']] as const).map(([key, placeholder]) => (
               <View key={key} style={styles.editorField}><Text style={[styles.editorLabel, { color: colors.text }]}>{placeholder}{key !== 'phone_number' && <Text style={{ color: '#FF5252' }}> *</Text>}</Text><TextInput style={[styles.editorInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]} placeholder={key === 'phone_number' ? 'Optional phone number' : placeholder} placeholderTextColor={colors.subText} value={profileForm[key]} onChangeText={(value) => setProfileForm((current) => ({ ...current, [key]: value }))} keyboardType={key === 'email' ? 'email-address' : key === 'phone_number' ? 'phone-pad' : 'default'} autoCapitalize={key === 'email' ? 'none' : 'words'} /></View>
             ))}
-            <View style={styles.editorActions}><TouchableOpacity style={[styles.cancelEditorBtn, { borderColor: colors.cardBorder }]} onPress={() => setProfileEditorVisible(false)}><Text style={[styles.cancelEditorText, { color: colors.subText }]}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.saveAddressBtn, styles.saveEditorBtn, { backgroundColor: colors.primary }]} onPress={saveProfile} disabled={profileSaving}><Ionicons name="checkmark" size={17} color="#0B1325" /><Text style={styles.saveAddressBtnText}>{profileSaving ? 'Saving...' : 'Save changes'}</Text></TouchableOpacity></View>
+            <View style={styles.editorActions}><TouchableOpacity style={[styles.cancelEditorBtn, { borderColor: colors.cardBorder }]} onPress={() => setProfileEditorVisible(false)}><Text style={[styles.cancelEditorText, { color: colors.subText }]}>{t('Cancel')}</Text></TouchableOpacity><TouchableOpacity style={[styles.saveAddressBtn, styles.saveEditorBtn, { backgroundColor: colors.primary }]} onPress={saveProfile} disabled={profileSaving}><Ionicons name="checkmark" size={17} color="#0B1325" /><Text style={styles.saveAddressBtnText}>{profileSaving ? t('Saving...') : t('Save changes')}</Text></TouchableOpacity></View>
           </View>
         </View>
       </Modal>
@@ -560,11 +560,11 @@ export default function PassengerProfileScreen() {
       <Modal visible={verificationVisible} transparent animationType="slide" onRequestClose={() => setVerificationVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.addressModalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={styles.modalHeader}><Text style={[styles.modalTitle, { color: colors.text }]}>Enter email PIN</Text><TouchableOpacity onPress={() => setVerificationVisible(false)}><Ionicons name="close" size={22} color={colors.text} /></TouchableOpacity></View>
+            <View style={styles.modalHeader}><Text style={[styles.modalTitle, { color: colors.text }]}>{t('Enter email PIN')}</Text><TouchableOpacity onPress={() => setVerificationVisible(false)}><Ionicons name="close" size={22} color={colors.text} /></TouchableOpacity></View>
             <Text style={[styles.modalSubText, { color: colors.subText }]}>Enter the 6-digit code sent to {user?.email}.</Text>
             <TextInput style={[styles.addressInput, styles.verificationInput, { backgroundColor: colors.inputBg, color: colors.text }]} placeholder="000000" placeholderTextColor={colors.subText} keyboardType="number-pad" maxLength={7} value={verificationCode} onChangeText={(value) => setVerificationCode(value.replace(/\D/g, '').slice(0, 6))} autoFocus />
             <TouchableOpacity style={[styles.saveAddressBtn, { backgroundColor: colors.primary }]} onPress={confirmVerification} disabled={verificationLoading}><Text style={styles.saveAddressBtnText}>{verificationLoading ? 'Verifying...' : 'Verify account'}</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.resendButton} onPress={sendVerificationCode} disabled={verificationLoading}><Text style={[styles.resendText, { color: colors.primary }]}>Resend PIN</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.resendButton} onPress={sendVerificationCode} disabled={verificationLoading}><Text style={[styles.resendText, { color: colors.primary }]}>{t('Resend PIN')}</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>

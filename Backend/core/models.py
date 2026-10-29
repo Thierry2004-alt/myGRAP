@@ -1,4 +1,4 @@
-import random
+import secrets
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
@@ -111,6 +111,43 @@ class RideCategory(models.Model):
         return self.name
 
 
+class Place(models.Model):
+    class Category(models.TextChoices):
+        DINING = 'DINING', 'Dining'
+        PARKS = 'PARKS', 'Parks & nature'
+        CULTURE = 'CULTURE', 'Culture & heritage'
+        SHOPPING = 'SHOPPING', 'Shopping'
+        SPORTS = 'SPORTS', 'Sports & events'
+
+    slug = models.SlugField(max_length=120, unique=True)
+    name = models.CharField(max_length=160)
+    category = models.CharField(max_length=80)
+    category_code = models.CharField(max_length=20, choices=Category.choices)
+    zone = models.CharField(max_length=120)
+    icon = models.CharField(max_length=40, default='location')
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    description = models.TextField()
+    highlights = models.JSONField(default=list, blank=True)
+    search_keywords = models.JSONField(default=list, blank=True)
+    image_path = models.CharField(max_length=255, blank=True, default='')
+    image_url = models.URLField(max_length=1000, blank=True, default='')
+    photo_credit = models.CharField(max_length=160, blank=True, default='')
+    photo_license = models.CharField(max_length=80, blank=True, default='')
+    photo_source_url = models.URLField(max_length=1000, blank=True, default='')
+    map_source_url = models.URLField(max_length=1000, blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('sort_order', 'name')
+
+    def __str__(self):
+        return f'{self.name} ({self.zone})'
+
+
 class Ride(models.Model):
     class Status(models.TextChoices):
         REQUESTED = 'REQUESTED', 'Requested'
@@ -119,6 +156,7 @@ class Ride(models.Model):
         DRIVER_ARRIVING = 'DRIVER_ARRIVING', 'Driver Arriving'
         DRIVER_AT_PICKUP = 'DRIVER_AT_PICKUP', 'Driver at Pickup'
         IN_PROGRESS = 'IN_PROGRESS', 'In Progress'
+        ARRIVED_AT_DESTINATION = 'ARRIVED_AT_DESTINATION', 'Arrived at Destination'
         COMPLETED = 'COMPLETED', 'Completed'
         CANCELLED_BY_PASSENGER = 'CANCELLED_BY_PASSENGER', 'Cancelled by Passenger'
         CANCELLED_BY_DRIVER = 'CANCELLED_BY_DRIVER', 'Cancelled by Driver'
@@ -156,7 +194,7 @@ class Ride(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.cash_otp:
-            self.cash_otp = str(random.randint(1000, 9999))
+            self.cash_otp = str(secrets.randbelow(9000) + 1000)
         super().save(*args, **kwargs)
 
     def __str__(self):

@@ -16,6 +16,7 @@ from .models import (
     Rating,
     DemandObservation,
     AIRecommendation,
+    Place,
 )
 
 
@@ -68,6 +69,29 @@ class DriverVehicleAssignmentAdmin(admin.ModelAdmin):
 class RideCategoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'code', 'base_fare', 'rate_per_km', 'multiplier')
     search_fields = ('name', 'code')
+
+
+@admin.register(Place)
+class PlaceAdmin(admin.ModelAdmin):
+    list_display = ('name', 'category_code', 'zone', 'is_active', 'sort_order', 'updated_at')
+    list_filter = ('category_code', 'is_active')
+    search_fields = ('name', 'slug', 'zone', 'description')
+    list_editable = ('is_active', 'sort_order')
+    readonly_fields = ('created_at', 'updated_at')
+    fieldsets = (
+        ('Listing', {
+            'fields': ('slug', 'name', 'category', 'category_code', 'zone', 'icon', 'description', 'highlights', 'search_keywords', 'is_active', 'sort_order'),
+        }),
+        ('Map location', {
+            'fields': ('latitude', 'longitude', 'map_source_url'),
+        }),
+        ('Photo and attribution', {
+            'fields': ('image_path', 'image_url', 'photo_credit', 'photo_license', 'photo_source_url'),
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+        }),
+    )
 
 
 @admin.register(Ride)

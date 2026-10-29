@@ -1,8 +1,11 @@
 from core import serializers
 import math
 import json
+import logging
 import os
+import re
 import secrets
+import unicodedata
 from urllib.parse import quote
 from urllib.request import Request as UrlRequest, urlopen
 from datetime import datetime, timedelta
@@ -16,7 +19,8 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from django.db.models import Sum, Count, Avg, Q
+from django.db import transaction
+from django.db.models import Sum, Count, Avg, F, Q
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.utils.html import escape
@@ -28,7 +32,7 @@ from core.models import (
     User, PassengerProfile, DriverProfile, VehicleOwner, Vehicle,
     DriverVehicleAssignment, RideCategory, Ride, SharedRide,
     SharedRideParticipant, DriverEarning, WithdrawalRequest,
-    Rating, DemandObservation, AIRecommendation, Payment
+    Rating, DemandObservation, AIRecommendation, Payment, Place
 )
 from core.campay import (
     initiate_campay_collect, check_campay_status, initiate_campay_withdraw,
@@ -39,9 +43,12 @@ from core.serializers import (
     DriverProfileSerializer, VehicleSerializer, RideCategorySerializer,
     RideSerializer, SharedRideSerializer, SharedRideParticipantSerializer,
     DriverEarningSerializer, WithdrawalRequestSerializer, RatingSerializer,
-    AIRecommendationSerializer, DemandObservationSerializer, DriverProposalSerializer
+    AIRecommendationSerializer, DemandObservationSerializer, DriverProposalSerializer,
+    PlaceSerializer,
 )
 from core.permissions import IsPassenger, IsDriver, IsAdminUserRole
+
+logger = logging.getLogger(__name__)
 
 # Helper math: Haversine distance in kilometers
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -235,30 +242,49 @@ class GroqPlaceRecommendationView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        query = str(request.data.get('query', '')).strip()
-        places = request.data.get('places', [])
+        query = str(request.data.get('query', '')).strip()[:500]
         if not query:
             return Response({'error': 'Ask a recommendation question first.'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        places = [
+            {
+                'id': place.id,
+                'name': place.name,
+                'zone': place.zone,
+                'category': place.category,
+                'category_code': place.category_code,
+                'description': place.description,
+                'highlights': place.highlights,
+                'keywords': place.search_keywords,
+            }
+            for place in Place.objects.filter(is_active=True)
+        ]
+
+        ranked_places = self.rank_places(query, places)
+        recommendations = ranked_places[:3]
+        if not recommendations:
+            answer = self.local_recommendation(query, [])
+            return Response({
+                'answer': answer,
+                'source': 'catalogue-fallback',
+                'recommended_place_ids': [],
+            })
+
         gemini_api_key = os.getenv('GEMINI_API_KEY', '').strip()
         groq_api_key = os.getenv('GROQ_API_KEY', '').strip()
-
-        place_context = '\n'.join(
-            f"- {item.get('name')} in {item.get('zone')}: {item.get('description', '')}"
-            for item in places[:20] if isinstance(item, dict)
+        place_context = json.dumps(recommendations, ensure_ascii=False)
+        system_prompt = (
+            "You are GRAP's Yaoundé place concierge. Help the user choose from the provided place catalogue below. "
+            "Understand their intent and preferences (activity, neighbourhood, atmosphere, and who they are travelling with) "
+            "and explain briefly why the best matching place fits. Answer in the same language as the user's question.\n"
+            "Grounding rules: recommend only places in the supplied catalogue; use exact names and zones; do not invent "
+            "businesses, addresses, opening hours, prices, reviews, travel times, facilities, events, or safety claims. "
+            "Do not claim a place is open or that an event is happening. If the catalogue does not establish a requested "
+            "detail, say it is not available and suggest checking with the venue. If multiple options match, compare at "
+            "most three using only their descriptions and highlights. Keep the answer concise and useful.\n\n"
+            f"Matching catalogue entries (JSON): {place_context}"
         )
-
-        prompt_text = (
-            "You are GRAP AI Concierge, an extremely intelligent, elegant, and warm Yaoundé urban guide & place expert. "
-            "You possess deep geographical knowledge of ALL Yaoundé neighborhoods (Awae, Messamendongo, Odza, Mvan, Nsam, Ahala, Simbock, Bastos, Mont Fébé, Omnisports, Melen, Tsinga, Essos, Ekounou, Kondengui, Mokolo, Biyem-Assi, Etoudi, Elig-Essono, Avenue Kennedy, Nkolbisson, Nsimalen, and beyond) and Google Maps spatial layout.\n\n"
-            "CRITICAL MANDATORY RULES:\n"
-            "1. STRICT NEIGHBORHOOD FOCUS: Focus strictly on the exact neighborhood requested by the user and its immediate neighbor districts (e.g. for Awae, recommend spots in Awae Escalier, Carrefour Awae, Ekounou, Kondengui, Anguissa; for Messamendongo, recommend Messamendongo, Odza, Mvan).\n"
-            "2. DO NOT MENTION DISTANT DISTRICTS: NEVER mention Bastos, Mont Fébé, or other far away areas if the user asked for a specific neighborhood like Awae, Messamendongo, Nsam, etc., UNLESS the user specifically asked for Bastos!\n"
-            "3. NO GENERIC CATALOGUE FORCING: Do not force distant venues (like 'La Chaumière Bastos') into an answer for Awae or Messamendongo. Recommend 3-4 real, authentic local restaurants, grills, and lounges in/near the requested area.\n"
-            "4. BEAUTIFUL FORMATTING: Format your response beautifully with bold venue names (**Venue Name**), location tags (📍 Location), vibe descriptions, key highlights, and date/hangout advice.\n\n"
-            f"User Question: {query}"
-        )
-
+        prompt_text = f"{system_prompt}\n\nUser request: {query}"
 
         # 1. Try Gemini API first if configured
         if gemini_api_key:
@@ -281,30 +307,152 @@ class GroqPlaceRecommendationView(APIView):
                     data = json.loads(response.read().decode('utf-8'))
                 answer = data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
                 if answer:
-                    return Response({'answer': answer, 'source': 'gemini-3.6-flash'})
+                    return Response({
+                        'answer': answer,
+                        'source': 'gemini-3.6-flash',
+                        'recommended_place_ids': [place['id'] for place in recommendations],
+                    })
             except Exception as error:
-                print(f'Gemini recommendation error: {error}')
+                logger.warning('Gemini place recommendation failed: %s', error)
 
-        # 2. Fallback to local catalogue matching algorithm
-        fallback = self.local_recommendation(query, places)
-        return Response({'answer': fallback, 'source': 'catalogue-fallback'})
+        if groq_api_key:
+            try:
+                groq_payload = json.dumps({
+                    'model': 'llama-3.3-70b-versatile',
+                    'messages': [
+                        {'role': 'system', 'content': system_prompt},
+                        {'role': 'user', 'content': query},
+                    ],
+                    'temperature': 0.3,
+                    'max_tokens': 900,
+                }).encode('utf-8')
+                groq_request = UrlRequest(
+                    'https://api.groq.com/openai/v1/chat/completions',
+                    data=groq_payload,
+                    headers={
+                        'Authorization': f'Bearer {groq_api_key}',
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'GRAP-Backend/1.0',
+                    },
+                    method='POST',
+                )
+                with urlopen(groq_request, timeout=25) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                answer = data.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+                if answer:
+                    return Response({
+                        'answer': answer,
+                        'source': 'groq-llama-3.3-70b-versatile',
+                        'recommended_place_ids': [place['id'] for place in recommendations],
+                    })
+            except Exception as error:
+                logger.warning('Groq place recommendation failed: %s', error)
 
+        return Response({
+            'answer': self.local_recommendation(query, recommendations),
+            'source': 'catalogue-fallback',
+            'recommended_place_ids': [place['id'] for place in recommendations],
+        })
 
+    @staticmethod
+    def normalize_text(value):
+        normalized = unicodedata.normalize('NFKD', str(value)).encode('ascii', 'ignore').decode('ascii')
+        return re.sub(r'[^a-z0-9]+', ' ', normalized.lower()).strip()
+
+    @classmethod
+    def rank_places(cls, query, places):
+        normalized_query = cls.normalize_text(query)
+        raw_query_tokens = set(normalized_query.split())
+        query_tokens = set(raw_query_tokens)
+        stop_words = {
+            'a', 'an', 'and', 'are', 'at', 'for', 'in', 'is', 'me', 'near', 'of', 'on',
+            'or', 'please', 'the', 'to', 'with', 'yaounde', 'de', 'des', 'du', 'la',
+            'le', 'les', 'un', 'une', 'et', 'dans', 'pour', 'pres', 'proche', 'je',
+            'cherche', 'veux', 'voudrais', 'moi', 'what', 'where', 'should', 'want',
+            'can', 'we', 'do', 'best', 'recommend', 'recommendation', 'suggest',
+            'something', 'place', 'places', 'tell', 'me', 'about', 'que', 'faire',
+        }
+        query_tokens -= stop_words
+        category_intents = {
+            'DINING': {'restaurant', 'food', 'meal', 'dining', 'eat', 'dinner', 'lunch', 'cuisine', 'repas', 'manger', 'restaurant'},
+            'PARKS': {'park', 'nature', 'garden', 'zoo', 'animals', 'botanical', 'lake', 'outdoors', 'quiet', 'relax', 'family', 'children', 'child', 'enfant', 'calme', 'nature', 'jardin', 'lac', 'walk', 'walking', 'promenade', 'randonnee', 'hiking'},
+            'CULTURE': {'culture', 'museum', 'history', 'historic', 'monument', 'heritage', 'museum', 'histoire', 'culture', 'musee', 'monument'},
+            'SHOPPING': {'market', 'shopping', 'shop', 'buy', 'marché', 'marche', 'acheter', 'magasin'},
+            'SPORTS': {'football', 'soccer', 'match', 'stadium', 'sports', 'game', 'event', 'sport', 'stade', 'football', 'match'},
+        }
+        intent_codes = {
+            code for code, terms in category_intents.items()
+            if query_tokens.intersection(cls.normalize_text(' '.join(terms)).split())
+        }
+        general_visit_intent = bool(raw_query_tokens.intersection({
+            'visit', 'visiting', 'visiter', 'tourist', 'tourism', 'explore',
+            'exploring', 'outing', 'sortie', 'sortir', 'weekend',
+        }))
+        known_zones = {
+            'awae', 'messamendongo', 'odza', 'mvan', 'nsam', 'ahala', 'simbock',
+            'bastos', 'mont febe', 'omnisports', 'melen', 'tsinga', 'essos',
+            'ekounou', 'kondengui', 'mokolo', 'biyem assi', 'etoudi',
+            'elig essono', 'nkolbisson', 'nsimalen', 'warda', 'mfandena',
+            'centre administratif', 'centre ville', 'carrefour warda',
+        }
+        known_zones.update(cls.normalize_text(place.get('zone', '')) for place in places)
+        requested_zones = [zone for zone in known_zones if zone and zone in normalized_query]
+        if requested_zones:
+            places = [
+                place for place in places
+                if any(zone in cls.normalize_text(place.get('zone', '')) for zone in requested_zones)
+            ]
+
+        scored = []
+        for place in places:
+            name = cls.normalize_text(place.get('name', ''))
+            zone = cls.normalize_text(place.get('zone', ''))
+            category = cls.normalize_text(place.get('category', ''))
+            keywords = cls.normalize_text(' '.join(place.get('keywords', []))).split()
+            description_tokens = set(cls.normalize_text(
+                f"{place.get('description', '')} {' '.join(place.get('highlights', []))}"
+            ).split())
+            score = 0
+
+            if name and name in normalized_query:
+                score += 12
+            if zone and zone in normalized_query:
+                score += 7
+            if place.get('category_code') in intent_codes:
+                score += 6
+            elif general_visit_intent and place.get('category_code') in {'CULTURE', 'PARKS', 'SPORTS'}:
+                score += 3
+            score += 3 * len(query_tokens.intersection(set(keywords)))
+            score += len(query_tokens.intersection(set(name.split())))
+            score += len(query_tokens.intersection(set(category.split())))
+            score += len(query_tokens.intersection(description_tokens))
+
+            if score:
+                scored.append((score, place))
+
+        scored.sort(key=lambda item: (-item[0], item[1]['name'].casefold()))
+        return [place for _, place in scored]
 
     @staticmethod
     def local_recommendation(query, places):
-        query_words = set(str(query).lower().split())
-        scored = []
-        for place in places[:20]:
-            text = f"{place.get('name', '')} {place.get('zone', '')} {place.get('description', '')}".lower()
-            score = sum(1 for word in query_words if len(word) > 3 and word in text)
-            scored.append((score, place))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        chosen = [item[1] for item in scored[:2] if item[0] > 0] or places[:2]
-        if not chosen:
-            return 'I could not find a matching place in the Yaoundé catalogue yet. Try asking for dining, nature, culture, or shopping.'
-        recommendations = ', '.join(f"{place.get('name')} in {place.get('zone')}" for place in chosen)
-        return f"Based on our Yaoundé catalogue, I recommend {recommendations}. Open a place card to see its exact location and request a ride."
+        if not places:
+            return (
+                'Je ne trouve pas encore de lieu répertorié correspondant à cette demande dans notre guide de Yaoundé. '
+                'Essayez un quartier ou une catégorie comme nature, histoire, marché, restaurant ou sport.'
+                if any(word in GroqPlaceRecommendationView.normalize_text(query).split() for word in ('je', 'cherche', 'veux', 'ou', 'pres', 'marche'))
+                else 'I could not find a listed match in the Yaoundé guide yet. Try a neighbourhood or a category such as nature, history, markets, food, or sports.'
+            )
+        matches = '; '.join(
+            f"{place['name']} ({place['zone']}) — {place['description']}"
+            for place in places[:3]
+        )
+        return f"Based on your preferences, these places in the Yaoundé guide are the closest matches: {matches} Check current access details before travelling."
+
+
+class PlaceListView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PlaceSerializer
+    queryset = Place.objects.filter(is_active=True)
 
 
 class CurrentUserView(APIView):
@@ -441,18 +589,12 @@ class RequestRideView(APIView):
         category = RideCategory.objects.get(id=category_id)
         est_fare = calculate_fare(dist_km, category.code)
 
-        # Match driver from request or assign available verified driver (e.g. Paul Nkoa)
+        # In production: driver is unassigned when a ride is requested.
+        # Available online drivers will receive the request in their feed to accept.
         driver_id = data.get('driver_id')
         driver_obj = None
         if driver_id:
             driver_obj = User.objects.filter(id=driver_id, role=User.Role.DRIVER).first()
-        elif data.get('driver_username'):
-            driver_obj = User.objects.filter(username=data.get('driver_username'), role=User.Role.DRIVER).first()
-
-        if not driver_obj:
-            driver_obj = User.objects.filter(role=User.Role.DRIVER, driver_profile__is_online=True).first()
-        if not driver_obj:
-            driver_obj = User.objects.filter(role=User.Role.DRIVER).first()
 
         ride = Ride.objects.create(
             passenger=request.user,
@@ -481,7 +623,7 @@ class RequestRideView(APIView):
             request_count=1
         )
 
-        return Response(RideSerializer(ride).data, status=status.HTTP_201_CREATED)
+        return Response(RideSerializer(ride, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
 
 class PassengerMyRidesView(generics.ListAPIView):
@@ -986,27 +1128,94 @@ class MakeRideShareableView(APIView):
         })
 
 
+def get_driver_wallet_balances(driver):
+    earnings = DriverEarning.objects.filter(driver=driver)
+    matching_payment = (
+        Q(source_participant__isnull=True, ride__payments__participant__isnull=True) |
+        Q(source_participant__isnull=False, source_participant_id=F('ride__payments__participant_id'))
+    )
+    successful_payments = {
+        'ride__payments__status': Payment.Status.SUCCESSFUL,
+    }
+    cash_commission = earnings.filter(
+        matching_payment,
+        **successful_payments,
+        ride__payments__method=Payment.Method.CASH,
+    ).distinct().aggregate(total=Sum('commission_amount'))['total'] or Decimal('0.00')
+    platform_net = earnings.filter(
+        matching_payment,
+        **successful_payments,
+        ride__payments__method__in=[
+            Payment.Method.MOBILE_MONEY,
+            Payment.Method.CARD,
+            Payment.Method.WALLET,
+        ],
+    ).distinct().aggregate(total=Sum('net_earning'))['total'] or Decimal('0.00')
+    total_withdrawn = WithdrawalRequest.objects.filter(
+        driver=driver,
+        status=WithdrawalRequest.WithdrawalStatus.PROCESSED,
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    unspent_platform_balance = max(Decimal('0.00'), platform_net - total_withdrawn)
+    commission_due = max(Decimal('0.00'), cash_commission - unspent_platform_balance)
+    available_balance = max(Decimal('0.00'), unspent_platform_balance - cash_commission)
+    return {
+        'platform_net': platform_net,
+        'total_withdrawn': total_withdrawn,
+        'cash_commission_due': commission_due,
+        'available_balance': available_balance,
+    }
+
+
 class ConfirmCashPaymentView(APIView):
-    permission_classes = [IsPassenger]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         ride_id = request.data.get('ride_id')
         entered_pin = request.data.get('otp_pin')
 
-        try:
-            ride = Ride.objects.filter(id=ride_id).first()
-            if not ride:
-                return Response({'error': 'Ride not found.'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception:
-            return Response({'error': 'Ride not found.'}, status=status.HTTP_404_NOT_FOUND)
+        with transaction.atomic():
+            try:
+                ride = Ride.objects.select_for_update().get(id=ride_id, driver=request.user)
+            except (Ride.DoesNotExist, TypeError, ValueError):
+                return Response({'error': 'Ride not found or not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if ride.cash_otp == str(entered_pin) or str(entered_pin) == '4892' or str(entered_pin) == str(ride.cash_otp):
+            if ride.status == Ride.Status.COMPLETED and ride.payment_status == Ride.PaymentStatus.CONFIRMED:
+                payment = Payment.objects.filter(
+                    ride=ride,
+                    participant=None,
+                    method=Payment.Method.CASH,
+                    status=Payment.Status.SUCCESSFUL,
+                ).first()
+                if payment:
+                    return Response({
+                        'message': 'Cash payment was already confirmed.',
+                        'status': ride.status,
+                        'payment_status': ride.payment_status,
+                        'final_fare': ride.final_fare,
+                        'ride_id': ride.id,
+                    })
+
+            if ride.status != Ride.Status.ARRIVED_AT_DESTINATION:
+                return Response(
+                    {'error': 'Cash payment can only be confirmed after arrival at the destination.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if ride.is_shared or SharedRide.objects.filter(primary_ride=ride).exists():
+                return Response(
+                    {'error': 'Cash PIN confirmation is not available for shared rides. Use mobile money instead.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not entered_pin or str(entered_pin) != ride.cash_otp:
+                return Response({'error': 'Invalid cash payment PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+
             ride.payment_status = Ride.PaymentStatus.CONFIRMED
             ride.status = Ride.Status.COMPLETED
             ride.completed_at = timezone.now()
             if not ride.final_fare:
                 ride.final_fare = ride.estimated_fare
-            ride.save()
+            ride.save(update_fields=['payment_status', 'status', 'completed_at', 'final_fare'])
 
             Payment.objects.update_or_create(
                 ride=ride,
@@ -1019,14 +1228,25 @@ class ConfirmCashPaymentView(APIView):
                 }
             )
 
-            if hasattr(ride, 'shared_ride_group'):
-                s_group = ride.shared_ride_group
-                s_group.status = SharedRide.SharedStatus.COMPLETED
-                s_group.available_seats = 0
-                s_group.save()
-                for p in s_group.participants.all():
-                    p.payment_status = Ride.PaymentStatus.CONFIRMED
-                    p.save(update_fields=['payment_status'])
+            if ride.driver and hasattr(ride.driver, 'driver_profile'):
+                gross = Decimal(str(ride.final_fare or ride.estimated_fare))
+                commission = (gross * Decimal('0.15')).quantize(Decimal('0.01'))
+                DriverEarning.objects.update_or_create(
+                    driver=ride.driver,
+                    ride=ride,
+                    source_participant=None,
+                    defaults={
+                        'gross_fare': gross,
+                        'commission_rate': 15.0,
+                        'commission_amount': commission,
+                        'net_earning': gross - commission,
+                    },
+                )
+                profile = ride.driver.driver_profile
+                profile.total_rides = DriverEarning.objects.filter(
+                    driver=ride.driver,
+                ).values('ride').distinct().count()
+                profile.save(update_fields=['total_rides'])
 
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -1035,55 +1255,21 @@ class ConfirmCashPaymentView(APIView):
                     'type': 'ride_completed',
                     'data': {
                         'ride_id': ride.id,
-                        'status': 'COMPLETED',
-                        'payment_status': 'CONFIRMED'
-                    }
-                }
+                        'status': ride.status,
+                        'payment_status': ride.payment_status,
+                    },
+                },
             )
 
-            if not ride.driver:
-                ride.driver = User.objects.filter(username='driver1').first() or User.objects.filter(role=User.Role.DRIVER).first()
-                ride.save(update_fields=['driver'])
-
-            if ride.driver and hasattr(ride.driver, 'driver_profile'):
-                gross = float(ride.final_fare or ride.estimated_fare)
-                comm_rate = 15.0
-                comm_amount = round(gross * (comm_rate / 100.0), 2)
-                net_earning = round(gross - comm_amount, 2)
-                DriverEarning.objects.get_or_create(
-                    driver=ride.driver,
-                    ride=ride,
-                    source_participant=None,
-                    defaults={
-                        'gross_fare': Decimal(str(gross)),
-                        'commission_rate': comm_rate,
-                        'commission_amount': Decimal(str(comm_amount)),
-                        'net_earning': Decimal(str(net_earning))
-                    }
-                )
-                dp = ride.driver.driver_profile
-                dp.total_rides = DriverEarning.objects.filter(driver=ride.driver).values('ride').distinct().count()
-                dp.save(update_fields=['total_rides'])
-
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f'ride_{ride.id}',
-                {
-                    'type': 'ride_completed',
-                    'ride_id': ride.id,
-                }
-            )
-
-            return Response({
-                'message': 'Cash payment confirmed & ride completed successfully!',
-                'status': 'COMPLETED',
-                'final_fare': ride.final_fare,
-                'completed_at': ride.completed_at,
-                'ride_id': ride.id,
-                'driver_id': ride.driver_id
-            })
-        else:
-            return Response({'error': 'Invalid OTP PIN code. Please check with your driver.'}, status=status.HTTP_400_BAD_REQUEST)
+        wallet = get_driver_wallet_balances(request.user)
+        return Response({
+            'message': 'Cash payment confirmed and trip completed.',
+            'status': ride.status,
+            'payment_status': ride.payment_status,
+            'final_fare': ride.final_fare,
+            'ride_id': ride.id,
+            'cash_commission_due': float(wallet['cash_commission_due']),
+        })
 
 
 class ConfirmDigitalPaymentView(APIView):
@@ -1385,7 +1571,7 @@ class RateDriverView(APIView):
         if hasattr(ride.driver, 'driver_profile'):
             dp = ride.driver.driver_profile
             agg = Rating.objects.filter(driver=ride.driver).aggregate(avg=Avg('score'))
-            dp.rating_avg = round(float(agg['avg'] or 5.0), 2)
+            dp.rating_avg = round(float(agg['avg'] or 0.0), 2)
             dp.save(update_fields=['rating_avg'])
 
         channel_layer = get_channel_layer()
@@ -1422,6 +1608,25 @@ class DriverStatusView(APIView):
         driver_profile.save()
 
         return Response(DriverProfileSerializer(driver_profile).data)
+
+
+class DriverActiveRideView(APIView):
+    permission_classes = [IsDriver]
+
+    def get(self, request):
+        active_ride = Ride.objects.filter(
+            driver=request.user,
+            status__in=[
+                Ride.Status.ACCEPTED,
+                Ride.Status.DRIVER_ARRIVING,
+                Ride.Status.DRIVER_AT_PICKUP,
+                Ride.Status.IN_PROGRESS,
+                Ride.Status.ARRIVED_AT_DESTINATION,
+            ]
+        ).select_related('passenger', 'category').first()
+        if not active_ride:
+            return Response(None, status=status.HTTP_200_OK)
+        return Response(RideSerializer(active_ride).data)
 
 
 class DriverRideFeedView(APIView):
@@ -1468,64 +1673,36 @@ class DriverUpdateRideStatusView(APIView):
         except Ride.DoesNotExist:
             return Response({'error': 'Ride not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
 
+        allowed_transitions = {
+            Ride.Status.ACCEPTED: {Ride.Status.DRIVER_AT_PICKUP, Ride.Status.CANCELLED_BY_DRIVER},
+            Ride.Status.DRIVER_ARRIVING: {Ride.Status.DRIVER_AT_PICKUP, Ride.Status.CANCELLED_BY_DRIVER},
+            Ride.Status.DRIVER_AT_PICKUP: {Ride.Status.IN_PROGRESS, Ride.Status.CANCELLED_BY_DRIVER},
+            Ride.Status.IN_PROGRESS: {
+                Ride.Status.ARRIVED_AT_DESTINATION,
+                Ride.Status.CANCELLED_BY_DRIVER,
+            },
+            Ride.Status.ARRIVED_AT_DESTINATION: {Ride.Status.CANCELLED_BY_DRIVER},
+        }
+        if new_status not in allowed_transitions.get(ride.status, set()):
+            return Response(
+                {'error': f'Cannot change ride status from {ride.status} to {new_status}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         ride.status = new_status
+        update_fields = ['status']
+        if new_status == Ride.Status.ARRIVED_AT_DESTINATION:
+            ride.cash_otp = str(secrets.randbelow(9000) + 1000)
+            update_fields.append('cash_otp')
+        ride.save(update_fields=update_fields)
         channel_layer = get_channel_layer()
-        if new_status == Ride.Status.COMPLETED:
-            ride.completed_at = timezone.now()
-            ride.final_fare = ride.estimated_fare
-            ride.save()
-
-            Payment.objects.update_or_create(
-                ride=ride,
-                participant=None,
-                defaults={
-                    'amount': ride.final_fare or ride.estimated_fare,
-                    'method': Payment.Method.CASH,
-                    'status': Payment.Status.SUCCESSFUL,
-                    'paid_at': timezone.now(),
-                }
-            )
-
-            # Calculate Earnings (15% platform commission)
-            gross = float(ride.final_fare)
-            comm_rate = 15.0
-            comm_amount = round(gross * (comm_rate / 100.0), 2)
-            net_earning = round(gross - comm_amount, 2)
-
-            DriverEarning.objects.get_or_create(
-                driver=request.user,
-                ride=ride,
-                source_participant=None,
-                defaults={
-                    'gross_fare': Decimal(str(gross)),
-                    'commission_rate': comm_rate,
-                    'commission_amount': Decimal(str(comm_amount)),
-                    'net_earning': Decimal(str(net_earning))
-                }
-            )
-
-            # Update Driver profile stats
-            if hasattr(request.user, 'driver_profile'):
-                dp = request.user.driver_profile
-                dp.total_rides += 1
-                dp.save()
-
-            async_to_sync(channel_layer.group_send)(
-                f'ride_{ride.id}',
-                {
-                    'type': 'ride_completed',
-                    'data': {'ride_id': ride.id, 'status': 'COMPLETED'},
-                }
-            )
-        else:
-            ride.save()
-            async_to_sync(channel_layer.group_send)(
-                f'ride_{ride.id}',
-                {
-                    'type': 'ride_status_updated',
-                    'data': {'ride_id': ride.id, 'status': new_status},
-                }
-            )
+        async_to_sync(channel_layer.group_send)(
+            f'ride_{ride.id}',
+            {
+                'type': 'ride_status_updated',
+                'data': {'ride_id': ride.id, 'status': new_status},
+            }
+        )
 
         return Response(RideSerializer(ride).data)
 
@@ -1543,13 +1720,11 @@ class DriverEarningsView(APIView):
         completed_rides_count = earnings.values('ride').distinct().count()
 
         withdrawals = WithdrawalRequest.objects.filter(driver=request.user).order_by('-requested_at')
-        total_withdrawn = withdrawals.filter(status=WithdrawalRequest.WithdrawalStatus.PROCESSED).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
-        # Real withdrawable earning: 85% of 25 FCFA per earning row (each row = one passenger's fare paid)
-        rate_per_earning = Decimal('21.25')
         total_earning_rows = earnings.count()
-        total_real_earnings = Decimal(str(total_earning_rows)) * rate_per_earning
-        available_balance = max(Decimal('0.00'), total_real_earnings - total_withdrawn)
+        total_real_earnings = total_net
+        rate_per_earning = round(total_net / Decimal(str(total_earning_rows)), 2) if total_earning_rows > 0 else Decimal('0.00')
+        wallet = get_driver_wallet_balances(request.user)
 
         return Response({
             'total_gross_earnings': float(total_gross),
@@ -1558,9 +1733,10 @@ class DriverEarningsView(APIView):
             'completed_rides_count': completed_rides_count,
             'rate_per_ride': float(rate_per_earning),
             'total_real_earned': float(total_real_earnings),
-            'total_withdrawn': float(total_withdrawn),
-            'available_balance': round(float(available_balance), 2),
-            'demo_payout_note': 'Campay linked: 85% of 25 FCFA (21.25 FCFA) withdrawable per completed payment (primary + each shared passenger).',
+            'total_withdrawn': float(wallet['total_withdrawn']),
+            'cash_commission_due': float(wallet['cash_commission_due']),
+            'available_balance': round(float(wallet['available_balance']), 2),
+            'payout_note': 'Campay linked: Net earnings withdrawable directly to MTN MoMo / Orange Money.',
             'earnings_history': DriverEarningSerializer(earnings[:20], many=True).data,
             'withdrawals_history': WithdrawalRequestSerializer(withdrawals[:20], many=True).data
         })
@@ -1577,16 +1753,8 @@ class WithdrawalRequestView(APIView):
         if amount <= 0:
             return Response({'error': 'Enter a valid withdrawal amount.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check against available real balance (exact same logic as DriverEarningsView)
-        earnings = DriverEarning.objects.filter(driver=request.user)
-        rate_per_earning = Decimal('21.25')
-        total_earning_rows = earnings.count()
-        total_real_earnings = Decimal(str(total_earning_rows)) * rate_per_earning
-        total_withdrawn = WithdrawalRequest.objects.filter(
-            driver=request.user,
-            status=WithdrawalRequest.WithdrawalStatus.PROCESSED
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        available_balance = max(Decimal('0.00'), total_real_earnings - total_withdrawn)
+        wallet = get_driver_wallet_balances(request.user)
+        available_balance = wallet['available_balance']
 
         if amount > available_balance:
             return Response({
@@ -1623,97 +1791,17 @@ class DriverAIDemandRecommendationsView(APIView):
     permission_classes = [IsDriver]
 
     def get(self, request):
-        """
-        GRAP Innovation Feature:
-        Aggregates real passenger search observations and ride demand data from the platform.
-        """
+        """Return live activity totals without generated zones or route recommendations."""
         driver = request.user
-        
-        # 1. Platform-wide real demand observations from searches & ride requests
-        top_zones = DemandObservation.objects.values('zone_name', 'hour_of_day').annotate(
-            total_requests=Sum('request_count')
-        ).order_by('-total_requests')[:8]
-
-        zone_insights = []
-        max_requests = 1
-        for z in top_zones:
-            if z['total_requests'] > max_requests:
-                max_requests = z['total_requests']
-
-        for zone in top_zones:
-            hr = zone['hour_of_day']
-            intensity = min(98, max(50, int((zone['total_requests'] / max_requests) * 95)))
-            zone_insights.append({
-                'zone_name': zone['zone_name'],
-                'peak_time': f"{hr:02d}:00 - {(hr+2)%24:02d}:00",
-                'demand_score': intensity,
-                'total_searches': zone['total_requests']
-            })
-
-        # If few observations in DB, supplement with key Yaoundé mobility hubs
-        if len(zone_insights) < 3:
-            existing_names = [z['zone_name'] for z in zone_insights]
-            defaults = [
-                {'zone_name': 'Mvan Bus Terminal', 'peak_time': '16:00 - 19:30', 'demand_score': 92, 'total_searches': 12},
-                {'zone_name': 'Bastos Ambassades', 'peak_time': '18:00 - 21:00', 'demand_score': 88, 'total_searches': 9},
-                {'zone_name': 'Marché Mokolo', 'peak_time': '07:30 - 10:00', 'demand_score': 85, 'total_searches': 8},
-                {'zone_name': 'Omnisports Stadium', 'peak_time': '12:00 - 15:00', 'demand_score': 78, 'total_searches': 6},
-            ]
-            for d in defaults:
-                if d['zone_name'] not in existing_names:
-                    zone_insights.append(d)
-
-        # 2. Driver personal history analysis
         completed_rides = Ride.objects.filter(driver=driver, status=Ride.Status.COMPLETED)
         completed_count = completed_rides.count()
-
-        recommendations = []
-        if completed_count > 0:
-            top_dest = completed_rides.values('destination_name').annotate(cnt=Count('id')).order_by('-cnt').first()
-            top_pickup = completed_rides.values('pickup_name').annotate(cnt=Count('id')).order_by('-cnt').first()
-            dest_name = top_dest['destination_name'] if top_dest else 'Bastos'
-            pickup_name = top_pickup['pickup_name'] if top_pickup else 'Mvan'
-            recommendations.append({
-                'id': 1,
-                'title': 'Personal Routine Insight',
-                'message': f"Based on your {completed_count} completed trips, your highest volume route is {pickup_name} -> {dest_name}. High commuter demand is active around {pickup_name}.",
-                'target_zone': pickup_name,
-                'time_window': '17:00 - 19:30',
-                'confidence': 0.94
-            })
-            recommendations.append({
-                'id': 2,
-                'title': 'Dynamic Sharing Opportunity',
-                'message': f"Trips towards {dest_name} have a high shared ride compatibility rate. Turn on Shareable Mode to earn up to 40% more per kilometer.",
-                'target_zone': dest_name,
-                'time_window': '08:00 - 18:00',
-                'confidence': 0.89
-            })
-        else:
-            recommendations.append({
-                'id': 1,
-                'title': 'High Earning Opportunity',
-                'message': 'Real passenger search activity is highest around Mvan -> Bastos. Positioning near Mvan increases match speed by ~60%.',
-                'target_zone': 'Mvan Bus Terminal',
-                'time_window': '16:30 - 19:30',
-                'confidence': 0.91
-            })
-            recommendations.append({
-                'id': 2,
-                'title': 'Morning Peak Prediction',
-                'message': 'High commuter search volume recorded near Marché Mokolo between 07:00 and 09:30.',
-                'target_zone': 'Marché Mokolo',
-                'time_window': '07:00 - 09:30',
-                'confidence': 0.86
-            })
-
         total_searches_recorded = DemandObservation.objects.aggregate(total=Sum('request_count'))['total'] or 0
 
         return Response({
             'driver_total_rides': completed_count,
             'total_platform_searches': total_searches_recorded,
-            'top_demand_zones': zone_insights[:6],
-            'ai_recommendations': recommendations
+            'top_demand_zones': [],
+            'ai_recommendations': []
         })
 
 
@@ -1802,7 +1890,8 @@ class AdminSystemMetricsView(APIView):
         cancelled_rides = all_rides.filter(status__startswith='CANCELLED').count()
         in_progress_rides = all_rides.filter(status__in=[
             Ride.Status.REQUESTED, Ride.Status.MATCHING, Ride.Status.ACCEPTED,
-            Ride.Status.DRIVER_ARRIVING, Ride.Status.DRIVER_AT_PICKUP, Ride.Status.IN_PROGRESS
+            Ride.Status.DRIVER_ARRIVING, Ride.Status.DRIVER_AT_PICKUP,
+            Ride.Status.IN_PROGRESS, Ride.Status.ARRIVED_AT_DESTINATION
         ]).count()
         shared_rides_count = all_rides.filter(is_shared=True).count() or all_rides.filter(is_shareable=True).count()
 
@@ -1938,21 +2027,3 @@ class AdminSystemMetricsView(APIView):
             'daily_trends': daily_trends,
             'recent_live_feed': recent_feed,
         })
-
-
-class DriverProposalsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request):
-        category_id = request.query_params.get('category_id')
-        drivers = DriverProfile.objects.filter(
-            is_online=True,
-            verification_status=DriverProfile.VerificationStatus.VERIFIED
-        ).select_related('user').prefetch_related('assignments__vehicle')
-
-        if category_id:
-            drivers = drivers.filter(assignments__vehicle__category=category_id)
-
-        drivers = drivers.distinct()[:20]
-        serializer = DriverProposalSerializer(drivers, many=True)
-        return Response(serializer.data)

@@ -27,7 +27,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   requestEmailVerification: () => Promise<void>;
   verifyEmail: (code: string) => Promise<void>;
-  updateProfile: (data: { first_name: string; last_name: string; email: string; phone_number: string }) => Promise<void>;
+  updateProfile: (data: { first_name: string; last_name: string; email: string; phone_number: string; profile_picture_url?: string }) => Promise<void>;
   switchRoleDemo: (newRole: 'PASSENGER' | 'DRIVER' | 'ADMIN') => void;
 }
 

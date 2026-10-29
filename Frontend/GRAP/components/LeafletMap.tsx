@@ -18,6 +18,7 @@ interface LeafletMapProps {
   pickupName?: string;
   destName?: string;
   passengers?: PassengerMarker[];
+  showRoute?: boolean;
   onSelectLocation?: (lat: number, lng: number, name: string) => void;
 }
 
@@ -29,6 +30,7 @@ export default function LeafletMap({
   pickupName = 'Current Location (Mvan)',
   destName = 'Bastos Ambassades',
   passengers = [],
+  showRoute = true,
   onSelectLocation,
 }: LeafletMapProps) {
   const leafletAssets = Platform.OS === 'web'
@@ -115,46 +117,42 @@ export default function LeafletMap({
           }
         });
 
-        var dMarker = L.marker([${destLat}, ${destLng}], {icon: redIcon}).addTo(map)
-          .bindPopup("<b class='custom-popup'>Destination: ${destName}</b>");
+        var dMarker = ${showRoute ? `L.marker([${destLat}, ${destLng}], {icon: redIcon}).addTo(map)
+          .bindPopup("<b class='custom-popup'>Destination: ${destName}</b>")` : 'null'};
 
-        var routePolyline = L.polyline([], { color: '#0288D1', weight: 6, opacity: 0.95 }).addTo(map);
-        var driverCarMarker = null;
+        if (${showRoute ? 'true' : 'false'}) {
+          var routePolyline = L.polyline([], { color: '#0288D1', weight: 6, opacity: 0.95 }).addTo(map);
 
-        // FETCH REAL OSRM STREET ROUTE GEOMETRY
-        var osrmUrl = "https://router.project-osrm.org/route/v1/driving/" + ${pickupLng} + "," + ${pickupLat} + ";" + ${destLng} + "," + ${destLat} + "?overview=full&geometries=geojson";
+          // FETCH REAL OSRM STREET ROUTE GEOMETRY
+          var osrmUrl = "https://router.project-osrm.org/route/v1/driving/" + ${pickupLng} + "," + ${pickupLat} + ";" + ${destLng} + "," + ${destLat} + "?overview=full&geometries=geojson";
 
-        fetch(osrmUrl)
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data.routes && data.routes.length > 0) {
-              var coords = data.routes[0].geometry.coordinates;
-              var latLngs = coords.map(function(c) { return [c[1], c[0]]; });
-              routePolyline.setLatLngs(latLngs);
-              map.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
+          fetch(osrmUrl)
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              if (data.routes && data.routes.length > 0) {
+                var coords = data.routes[0].geometry.coordinates;
+                var latLngs = coords.map(function(c) { return [c[1], c[0]]; });
+                routePolyline.setLatLngs(latLngs);
+                map.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
 
-              // Place Driver Car on the midpoint of real road polyline
-              if (latLngs.length > 0) {
-                var midIdx = Math.floor(latLngs.length / 2);
-                driverCarMarker = L.marker(latLngs[midIdx], {icon: carIcon}).addTo(map);
+                // Place Driver Car on the midpoint of real road polyline
+                if (latLngs.length > 0) {
+                  var midIdx = Math.floor(latLngs.length / 2);
+                  L.marker(latLngs[midIdx], {icon: carIcon}).addTo(map);
+                }
               }
-            } else {
-              // Fallback to straight line if OSRM offline
+            })
+            .catch(function(err) {
               var fallbackLatLngs = [[${pickupLat}, ${pickupLng}], [${destLat}, ${destLng}]];
               routePolyline.setLatLngs(fallbackLatLngs);
               map.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
-            }
-          })
-          .catch(function(err) {
-            var fallbackLatLngs = [[${pickupLat}, ${pickupLng}], [${destLat}, ${destLng}]];
-            routePolyline.setLatLngs(fallbackLatLngs);
-            map.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
-          });
+            });
+        }
 
         map.on('click', function(e) {
           var lat = e.latlng.lat.toFixed(6);
           var lng = e.latlng.lng.toFixed(6);
-          dMarker.setLatLng(e.latlng);
+          if (dMarker) dMarker.setLatLng(e.latlng);
           var msgData = JSON.stringify({ type: 'MAP_CLICK', lat: lat, lng: lng });
           if (window.ReactNativeWebView) {
             window.ReactNativeWebView.postMessage(msgData);

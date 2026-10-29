@@ -9,7 +9,8 @@ export default function DriverEarningsScreen() {
   const { colors } = useTheme();
   const { t } = useLanguage();
   const [earningsData, setEarningsData] = useState<any | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [momoOperator, setMomoOperator] = useState<'MTN' | 'ORANGE'>('MTN');
   const [momoPhone, setMomoPhone] = useState('+237670003344');
@@ -23,11 +24,12 @@ export default function DriverEarningsScreen() {
 
   const loadEarnings = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.getDriverEarnings();
       setEarningsData(data);
     } catch (e) {
-      console.log('Earnings load error:', e);
+      setLoadError(e instanceof Error ? e.message : 'Could not load earnings.');
     } finally {
       setLoading(false);
     }
@@ -71,13 +73,14 @@ export default function DriverEarningsScreen() {
     } catch (e: any) {
       const msg = e.message || 'Failed to submit withdrawal request.';
       setPayoutError(msg);
-      Alert.alert('Withdrawal Error', msg);
+      Alert.alert(t('Withdrawal Error'), t(msg));
     } finally {
       setWithdrawing(false);
     }
   };
 
   const availableBalance = Number(earningsData?.available_balance || 0);
+  const cashCommissionDue = Number(earningsData?.cash_commission_due || 0);
   const totalNet = Number(earningsData?.total_net_earnings || 0);
   const totalGross = Number(earningsData?.total_gross_earnings || 0);
   const totalComm = Number(earningsData?.total_platform_commission || 0);
@@ -87,39 +90,52 @@ export default function DriverEarningsScreen() {
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.bg }]} contentContainerStyle={{ padding: 16 }}>
+      {loadError && (
+        <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: '#FF5252' }]}>
+          <Text style={[styles.emptyText, { color: '#FF5252' }]}>{loadError}</Text>
+          <TouchableOpacity onPress={loadEarnings} style={{ padding: 12 }}>
+            <Text style={{ color: colors.secondary, fontWeight: '700' }}>{t('Try again')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {/* Balance Overview Card */}
       <View style={[styles.balanceCard, { backgroundColor: colors.card, borderColor: colors.secondary }]}>
         <Text style={[styles.balanceLabel, { color: colors.subText }]}>{t('availableBalance')} (Real Withdrawable)</Text>
         <Text style={[styles.balanceAmount, { color: colors.secondary }]}>
           {availableBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} FCFA
         </Text>
+        {cashCommissionDue > 0 && (
+          <Text style={[styles.cardSub, { color: '#FF9800', textAlign: 'center', marginBottom: 10 }]}>
+            Outstanding cash commission: {cashCommissionDue.toLocaleString()} FCFA. This reduces funds available for withdrawal.
+          </Text>
+        )}
 
-        {/* Demo Link Note */}
+        {/* Payment Gateway Badge */}
         <View style={[styles.demoLinkBadge, { backgroundColor: `${colors.primary}15` }]}>
           <Ionicons name="flash" size={13} color={colors.primary} style={{ marginRight: 5 }} />
           <Text style={[styles.demoLinkText, { color: colors.primary }]}>
-            Campay Linked • 85% of Fare (21.25 FCFA) per completed passenger payment
+            Campay Linked • Net earnings withdrawable directly to MTN MoMo & Orange Money
           </Text>
         </View>
 
         <View style={[styles.statsRow, { borderTopColor: colors.cardBorder }]}>
           <View style={styles.statBox}>
-            <Text style={[styles.statLabel, { color: colors.subText }]}>Completed Trips</Text>
+            <Text style={[styles.statLabel, { color: colors.subText }]}>{t('Completed Trips')}</Text>
             <Text style={[styles.statValue, { color: colors.text }]}>{completedCount} Trips</Text>
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
           <View style={styles.statBox}>
-            <Text style={[styles.statLabel, { color: colors.subText }]}>Total Gross Worked</Text>
+            <Text style={[styles.statLabel, { color: colors.subText }]}>{t('Total Gross Worked')}</Text>
             <Text style={[styles.statValue, { color: colors.text }]}>{totalGross.toLocaleString()} FCFA</Text>
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
           <View style={styles.statBox}>
-            <Text style={[styles.statLabel, { color: colors.subText }]}>Platform Fee (15%)</Text>
+            <Text style={[styles.statLabel, { color: colors.subText }]}>{t('Platform Fee (15%)')}</Text>
             <Text style={[styles.statValue, { color: colors.subText }]}>{totalComm.toLocaleString()} FCFA</Text>
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
           <View style={styles.statBox}>
-            <Text style={[styles.statLabel, { color: colors.subText }]}>Driver Net (85%)</Text>
+            <Text style={[styles.statLabel, { color: colors.subText }]}>{t('Driver Net (85%)')}</Text>
             <Text style={[styles.statValue, { color: colors.primary }]}>{totalNet.toLocaleString()} FCFA</Text>
           </View>
         </View>
@@ -129,7 +145,7 @@ export default function DriverEarningsScreen() {
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
           <Ionicons name="wallet-outline" size={20} color={colors.secondary} style={{ marginRight: 8 }} />
-          <Text style={[styles.cardTitle, { color: colors.text }]}>Withdraw Real Earnings</Text>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>{t('Withdraw Real Earnings')}</Text>
         </View>
         <Text style={[styles.cardSub, { color: colors.subText }]}>
           Transfer eligible earnings directly to your Mobile Money wallet via Campay.
@@ -143,7 +159,7 @@ export default function DriverEarningsScreen() {
         )}
 
         {/* Operator Selector */}
-        <Text style={[styles.fieldLabel, { color: colors.subText }]}>Mobile Money Operator</Text>
+        <Text style={[styles.fieldLabel, { color: colors.subText }]}>{t('Mobile Money Operator')}</Text>
         <View style={styles.operatorRow}>
           <TouchableOpacity
             style={[
@@ -153,7 +169,7 @@ export default function DriverEarningsScreen() {
             onPress={() => setMomoOperator('MTN')}
           >
             <Text style={[styles.operatorEmoji]}>🟡</Text>
-            <Text style={[styles.operatorText, { color: momoOperator === 'MTN' ? '#FFCC00' : colors.text }]}>MTN MoMo</Text>
+            <Text style={[styles.operatorText, { color: momoOperator === 'MTN' ? '#FFCC00' : colors.text }]}>{t('MTN MoMo')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -164,12 +180,12 @@ export default function DriverEarningsScreen() {
             onPress={() => setMomoOperator('ORANGE')}
           >
             <Text style={[styles.operatorEmoji]}>🟠</Text>
-            <Text style={[styles.operatorText, { color: momoOperator === 'ORANGE' ? '#FF6600' : colors.text }]}>Orange Money</Text>
+            <Text style={[styles.operatorText, { color: momoOperator === 'ORANGE' ? '#FF6600' : colors.text }]}>{t('Orange Money')}</Text>
           </TouchableOpacity>
         </View>
 
         {/* Phone Input */}
-        <Text style={[styles.fieldLabel, { color: colors.subText }]}>Recipient Mobile Money Phone</Text>
+        <Text style={[styles.fieldLabel, { color: colors.subText }]}>{t('Recipient Mobile Money Phone')}</Text>
         <View style={[styles.inputGroup, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
           <Ionicons name="call-outline" size={16} color={colors.subText} style={{ marginRight: 8 }} />
           <TextInput
@@ -184,7 +200,7 @@ export default function DriverEarningsScreen() {
 
         {/* Amount Input */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={[styles.fieldLabel, { color: colors.subText }]}>Amount in FCFA</Text>
+          <Text style={[styles.fieldLabel, { color: colors.subText }]}>{t('Amount in FCFA')}</Text>
           {availableBalance > 0 && (
             <TouchableOpacity onPress={() => setWithdrawAmount(Math.floor(availableBalance).toString())}>
               <Text style={[styles.maxBtnText, { color: colors.primary }]}>Max: {availableBalance.toFixed(2)} FCFA</Text>
@@ -221,7 +237,7 @@ export default function DriverEarningsScreen() {
       </View>
 
       {/* Real Trip Earnings History */}
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>Real Trip Earnings History</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('Real Trip Earnings History')}</Text>
       {loading ? (
         <ActivityIndicator color={colors.secondary} style={{ marginVertical: 20 }} />
       ) : earningsHistory.length === 0 ? (
@@ -253,7 +269,6 @@ export default function DriverEarningsScreen() {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={[styles.tripNet, { color: colors.primary }]}>+{net.toLocaleString()} FCFA</Text>
-                  <Text style={[styles.tripRealRate, { color: colors.secondary }]}>+21.25 FCFA Real</Text>
                 </View>
               </View>
             </View>
@@ -264,12 +279,12 @@ export default function DriverEarningsScreen() {
       {/* Real Withdrawal History */}
       {withdrawalsHistory.length > 0 && (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 14 }]}>Withdrawal History</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 14 }]}>{t('Withdrawal History')}</Text>
           {withdrawalsHistory.map((w: any, idx: number) => (
             <View key={idx} style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.historyRow}>
                 <View>
-                  <Text style={[styles.tripTitle, { color: colors.text }]}>Campay Mobile Money Payout</Text>
+                  <Text style={[styles.tripTitle, { color: colors.text }]}>{t('Campay Mobile Money Payout')}</Text>
                   <Text style={[styles.tripSub, { color: colors.subText }]}>
                     {w.requested_at ? new Date(w.requested_at).toLocaleDateString() : 'Recent'} • Status: {w.status}
                   </Text>
@@ -289,47 +304,47 @@ export default function DriverEarningsScreen() {
               <Ionicons name="checkmark-circle" size={44} color="#00E676" />
             </View>
 
-            <Text style={[styles.receiptTitle, { color: colors.text }]}>Withdrawal Successful! 💸</Text>
+            <Text style={[styles.receiptTitle, { color: colors.text }]}>{t('Withdrawal Successful! 💸')}</Text>
             <Text style={[styles.receiptSubtitle, { color: colors.subText }]}>
               Funds have been disbursed to your Mobile Money account via Campay.
             </Text>
 
             <View style={[styles.receiptBox, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
               <View style={styles.receiptRow}>
-                <Text style={[styles.receiptLabel, { color: colors.subText }]}>Amount Transferred</Text>
+                <Text style={[styles.receiptLabel, { color: colors.subText }]}>{t('Amount Transferred')}</Text>
                 <Text style={[styles.receiptValueBold, { color: colors.secondary }]}>
                   {Number(payoutReceipt?.amount || 0).toLocaleString()} FCFA
                 </Text>
               </View>
 
               <View style={styles.receiptRow}>
-                <Text style={[styles.receiptLabel, { color: colors.subText }]}>Operator</Text>
+                <Text style={[styles.receiptLabel, { color: colors.subText }]}>{t('Operator')}</Text>
                 <Text style={[styles.receiptValue, { color: colors.text }]}>
                   {payoutReceipt?.operator === 'MTN' ? '🟡 MTN MoMo' : '🟠 Orange Money'}
                 </Text>
               </View>
 
               <View style={styles.receiptRow}>
-                <Text style={[styles.receiptLabel, { color: colors.subText }]}>Phone Number</Text>
+                <Text style={[styles.receiptLabel, { color: colors.subText }]}>{t('Phone Number')}</Text>
                 <Text style={[styles.receiptValue, { color: colors.text }]}>{payoutReceipt?.phone}</Text>
               </View>
 
               <View style={styles.receiptRow}>
-                <Text style={[styles.receiptLabel, { color: colors.subText }]}>Campay Reference</Text>
+                <Text style={[styles.receiptLabel, { color: colors.subText }]}>{t('Campay Reference')}</Text>
                 <Text style={[styles.receiptValueSmall, { color: colors.subText }]}>{payoutReceipt?.reference}</Text>
               </View>
 
               <View style={styles.receiptRow}>
-                <Text style={[styles.receiptLabel, { color: colors.subText }]}>Status</Text>
+                <Text style={[styles.receiptLabel, { color: colors.subText }]}>{t('Status')}</Text>
                 <View style={styles.statusBadge}>
-                  <Text style={styles.statusBadgeText}>PROCESSED</Text>
+                  <Text style={styles.statusBadgeText}>{t('PROCESSED')}</Text>
                 </View>
               </View>
 
               <View style={[styles.receiptDivider, { backgroundColor: colors.cardBorder }]} />
 
               <View style={styles.receiptRow}>
-                <Text style={[styles.receiptLabel, { color: colors.subText }]}>Remaining Balance</Text>
+                <Text style={[styles.receiptLabel, { color: colors.subText }]}>{t('Remaining Balance')}</Text>
                 <Text style={[styles.receiptValueBold, { color: colors.text }]}>
                   {Number(payoutReceipt?.new_balance || 0).toFixed(2)} FCFA
                 </Text>
@@ -340,7 +355,7 @@ export default function DriverEarningsScreen() {
               style={[styles.closeModalBtn, { backgroundColor: colors.primary }]}
               onPress={() => setPayoutReceipt(null)}
             >
-              <Text style={styles.closeModalBtnText}>Close & View Wallet</Text>
+              <Text style={styles.closeModalBtnText}>{t('Close & View Wallet')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -531,11 +546,6 @@ const styles = StyleSheet.create({
   tripNet: {
     fontSize: 15,
     fontWeight: '800',
-  },
-  tripRealRate: {
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 2,
   },
   modalOverlay: {
     flex: 1,

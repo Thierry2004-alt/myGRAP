@@ -14,6 +14,9 @@ export default function TabLayout() {
   const { contentPadding, isWeb } = useResponsive();
 
   const isDriver = role === 'DRIVER';
+  const displayName =
+    [user?.first_name, user?.last_name].filter(Boolean).join(' ') ||
+    (isDriver ? 'Driver' : user?.username || 'GRAP User');
   // Admin detection: check role, Django is_staff/is_superuser flags, and known admin usernames
   const isAdmin =
     role === 'ADMIN' ||
@@ -37,7 +40,7 @@ export default function TabLayout() {
           )}
         </View>
           <View>
-            <Text style={[styles.userName, { color: colors.text }]}>{user?.username || 'GRAP User'}</Text>
+            <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1} ellipsizeMode="tail">{displayName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: isAdmin ? 'rgba(255, 214, 0, 0.15)' : isDriver ? 'rgba(41, 182, 246, 0.15)' : 'rgba(0, 230, 118, 0.15)' }]}>
               <Text style={[styles.roleBadgeText, { color: isAdmin ? '#FFD600' : isDriver ? colors.secondary : colors.primary }]}>
                 {isAdmin ? 'ADMINISTRATOR' : isDriver ? t('driverMode').toUpperCase() : t('riderMode').toUpperCase()}
@@ -72,6 +75,7 @@ export default function TabLayout() {
       {/* Tabs Layout: role-based tabs — admins see ONLY admin tab */}
       <View style={styles.tabsShell}>
         <Tabs
+          initialRouteName={isDriver ? 'driver-home' : isAdmin ? 'admin-approval' : 'index'}
           screenOptions={{
             headerShown: false,
             tabBarStyle: [

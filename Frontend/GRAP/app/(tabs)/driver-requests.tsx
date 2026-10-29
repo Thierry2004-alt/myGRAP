@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { api } from '../../services/api';
 import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -8,21 +9,24 @@ import { useLanguage } from '../../context/LanguageContext';
 export default function DriverRequestsScreen() {
   const { colors } = useTheme();
   const { t } = useLanguage();
+  const router = useRouter();
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [acceptingId, setAcceptingId] = useState<number | null>(null);
 
   useEffect(() => {
     loadRequests();
+    // Auto-refresh requests every 5 seconds for real-time order broadcast
+    const interval = setInterval(loadRequests, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadRequests = async () => {
-    setLoading(true);
     try {
       const data = await api.getRideRequests();
-      setRequests(data);
+      setRequests(data || []);
     } catch (e) {
-      console.log('Error:', e);
+      console.log('Error loading requests:', e);
     } finally {
       setLoading(false);
     }
@@ -32,10 +36,19 @@ export default function DriverRequestsScreen() {
     setAcceptingId(id);
     try {
       await api.acceptRide(id);
-      Alert.alert('Ride Accepted!', `You accepted ride #${id}. Navigate to pickup.`);
-      loadRequests();
+      Alert.alert(
+        t('Ride Accepted!'),
+        t('You have accepted ride #{id}. Proceed to pickup passenger.').replace('{id}', String(id)),
+        [
+          {
+            text: t('Go to Trip Navigation'),
+            onPress: () => router.push('/driver-home'),
+          },
+        ]
+      );
+      router.push('/driver-home');
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Could not accept ride');
+      Alert.alert(t('Error'), e.message ? t(e.message) : t('Could not accept ride'));
     } finally {
       setAcceptingId(null);
     }
@@ -45,12 +58,18 @@ export default function DriverRequestsScreen() {
     <ScrollView style={[styles.container, { backgroundColor: colors.bg }]} contentContainerStyle={{ padding: 16 }}>
       <View style={styles.headerRow}>
         <Text style={[styles.title, { color: colors.text }]}>{t('requests')}</Text>
-        <TouchableOpacity style={styles.refreshBtn} onPress={loadRequests}>
+        <TouchableOpacity
+          style={styles.refreshBtn}
+          onPress={() => {
+            setLoading(true);
+            loadRequests();
+          }}
+        >
           <Ionicons name="refresh" size={18} color={colors.secondary} />
         </TouchableOpacity>
       </View>
 
-      {loading ? (
+      {loading && requests.length === 0 ? (
         <ActivityIndicator color={colors.secondary} style={{ marginVertical: 20 }} />
       ) : requests.length > 0 ? (
         requests.map((item) => (
@@ -64,7 +83,9 @@ export default function DriverRequestsScreen() {
               <Text style={[styles.fareText, { color: colors.primary }]}>{item.estimated_fare} FCFA</Text>
             </View>
 
-            <Text style={[styles.passengerName, { color: colors.text }]}>Passenger: {item.passenger_name || 'Rider'}</Text>
+            <Text style={[styles.passengerName, { color: colors.text }]}>
+              Passenger: {item.passenger_name || item.passenger_username || 'Rider'}
+            </Text>
 
             <View style={[styles.routeBox, { backgroundColor: colors.inputBg }]}>
               <View style={styles.routeRow}>
@@ -86,21 +107,28 @@ export default function DriverRequestsScreen() {
                 {acceptingId === item.id ? (
                   <ActivityIndicator color="#0B1325" />
                 ) : (
-                  <Text style={styles.acceptBtnText}>Accept Request</Text>
+                  <>
+                    <Ionicons name="checkmark-circle" size={16} color="#0B1325" style={{ marginRight: 6 }} />
+                    <Text style={styles.acceptBtnText}>{t('Accept Request')}</Text>
+                  </>
                 )}
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.rejectBtn} onPress={() => loadRequests()}>
-                <Text style={styles.rejectBtnText}>Decline</Text>
+                <Text style={styles.rejectBtnText}>{t('Decline')}</Text>
               </TouchableOpacity>
             </View>
           </View>
         ))
       ) : (
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 20, alignItems: 'center' }]}>
-          <Ionicons name="car-outline" size={32} color={colors.subText} style={{ marginBottom: 8 }} />
-          <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '700' }]}>No Pending Ride Requests</Text>
-          <Text style={[{ color: colors.subText, fontSize: 12, marginTop: 4, textAlign: 'center' }]}>New passenger pickup requests will appear here in real-time.</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 30, alignItems: 'center' }]}>
+          <Ionicons name="car-outline" size={48} color={colors.subText} style={{ marginBottom: 12 }} />
+          <Text style={[styles.passengerName, { color: colors.text, fontSize: 16, fontWeight: '700' }]}>
+            No Pending Ride Requests
+          </Text>
+          <Text style={[styles.routeText, { color: colors.subText, textAlign: 'center', marginTop: 6 }]}>
+            Real passenger ride requests in your area will appear here automatically.
+          </Text>
         </View>
       )}
     </ScrollView>
@@ -115,50 +143,50 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   title: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '800',
   },
   refreshBtn: {
-    padding: 4,
+    padding: 8,
   },
   card: {
     borderRadius: 16,
     padding: 16,
-    marginBottom: 14,
     borderWidth: 1,
+    marginBottom: 14,
   },
   cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   categoryBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 8,
   },
   categoryText: {
     fontSize: 12,
     fontWeight: '700',
   },
   fareText: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 16,
+    fontWeight: '800',
   },
   passengerName: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
     marginBottom: 10,
   },
   routeBox: {
+    borderRadius: 12,
     padding: 10,
-    borderRadius: 10,
-    gap: 6,
-    marginBottom: 12,
+    gap: 8,
+    marginBottom: 14,
   },
   routeRow: {
     flexDirection: 'row',
@@ -167,6 +195,8 @@ const styles = StyleSheet.create({
   },
   routeText: {
     fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
   },
   btnRow: {
     flexDirection: 'row',
@@ -176,25 +206,26 @@ const styles = StyleSheet.create({
     flex: 2,
     height: 44,
     borderRadius: 10,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   acceptBtnText: {
     color: '#0B1325',
-    fontSize: 14,
     fontWeight: '800',
+    fontSize: 14,
   },
   rejectBtn: {
     flex: 1,
-    backgroundColor: '#FF5252',
     height: 44,
     borderRadius: 10,
-    justifyContent: 'center',
+    backgroundColor: '#FF525220',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   rejectBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
+    color: '#FF5252',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });

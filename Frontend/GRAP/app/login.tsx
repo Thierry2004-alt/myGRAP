@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +15,8 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { api } from '../services/api';
 import { useResponsive } from '../utils/responsive';
 
 type Role = 'PASSENGER' | 'DRIVER';
@@ -33,6 +35,7 @@ const colors = {
 export default function LoginScreen() {
   const { contentPadding, isDesktop } = useResponsive();
   const { login, register } = useAuth();
+  const { language, setLanguage, t } = useLanguage();
   const [isSignUp, setIsSignUp] = useState(false);
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<Role>('PASSENGER');
@@ -44,12 +47,18 @@ export default function LoginScreen() {
     vehicleColor: '', vehiclePlate: '', vehicleCategory: 'ECONOMY', vehicleImage: '',
   });
 
+  useEffect(() => {
+    api.warmUp().catch((error) => {
+      console.warn('Backend warm-up failed:', error);
+    });
+  }, []);
+
   const update = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
 
   const chooseImage = async (key: 'licenseImage' | 'vehicleImage') => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo access to add your verification document.');
+      Alert.alert(t('Permission needed'), t('Allow photo access to add your verification document.'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -67,11 +76,11 @@ export default function LoginScreen() {
 
   const validateAccount = () => {
     if (!form.firstName.trim() || !form.lastName.trim() || !form.username.trim() || !form.email.trim() || !form.password) {
-      Alert.alert('Complete your profile', 'Add your name, email, username, and password to continue.');
+      Alert.alert(t('Complete your profile'), t('Add your name, email, username, and password to continue.'));
       return false;
     }
     if (form.password.length < 8) {
-      Alert.alert('Password too short', 'Use at least 8 characters for your password.');
+      Alert.alert(t('Password too short'), t('Use at least 8 characters for your password.'));
       return false;
     }
     return true;
@@ -80,7 +89,7 @@ export default function LoginScreen() {
   const validateDriver = () => {
     const required = [form.licenseNumber, form.vehicleMake, form.vehicleModel, form.vehicleYear, form.vehicleColor, form.vehiclePlate, form.vehicleImage];
     if (required.some((value) => !value.trim())) {
-      Alert.alert('Finish your driver profile', 'License and all vehicle details, including a clear vehicle photo, are required.');
+      Alert.alert(t('Finish your driver profile'), t('License and all vehicle details, including a clear vehicle photo, are required.'));
       return false;
     }
     return true;
@@ -94,7 +103,7 @@ export default function LoginScreen() {
     }
     if (isSignUp && role === 'DRIVER' && !validateDriver()) return;
     if (!isSignUp && (!form.username.trim() || !form.password)) {
-      Alert.alert('Welcome back', 'Enter your username and password to continue.');
+      Alert.alert(t('Welcome back'), t('Enter your username and password to continue.'));
       return;
     }
 
@@ -116,7 +125,7 @@ export default function LoginScreen() {
         await login(form.username.trim(), form.password);
       }
     } catch (error: any) {
-      Alert.alert('Unable to continue', error.message || 'Please check your details and try again.');
+      Alert.alert(t('Unable to continue'), error.message || t('Please check your details and try again.'));
     } finally {
       setLoading(false);
     }
@@ -133,7 +142,7 @@ export default function LoginScreen() {
       <TextInput
         {...options}
         style={styles.input}
-        placeholder={placeholder}
+        placeholder={t(placeholder)}
         placeholderTextColor="#94A39D"
         value={form[key]}
         onChangeText={(value) => update(key, value)}
@@ -145,8 +154,8 @@ export default function LoginScreen() {
     <Pressable style={styles.uploadTile} onPress={() => chooseImage(key)}>
       {form[key] ? <Image source={{ uri: form[key] }} style={styles.preview} /> : <Ionicons name={icon} size={27} color={colors.green} />}
       <View style={styles.uploadCopy}>
-        <Text style={styles.uploadTitle}>{form[key] ? 'Photo selected' : title}</Text>
-        <Text style={styles.uploadSubtitle}>{form[key] ? 'Tap to replace' : subtitle}</Text>
+        <Text style={styles.uploadTitle}>{form[key] ? t('Photo selected') : t(title)}</Text>
+        <Text style={styles.uploadSubtitle}>{form[key] ? t('Tap to replace') : t(subtitle)}</Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color={colors.muted} />
     </Pressable>
@@ -158,52 +167,55 @@ export default function LoginScreen() {
         <View style={[styles.contentInner, isDesktop && styles.contentInnerDesktop]}>
         <View style={styles.brandRow}>
           <Image source={require('../assets/images/logo.png')} style={styles.logo} />
-          <View><Text style={styles.brand}>GRAP</Text><Text style={styles.brandTag}>Ride together, go further</Text></View>
+          <View><Text style={styles.brand}>GRAP</Text><Text style={styles.brandTag}>{t('Ride together, go further')}</Text></View>
+          <Pressable onPress={() => setLanguage(language === 'en' ? 'fr' : 'en')} style={{ marginLeft: 'auto', padding: 10 }}>
+            <Text style={{ color: colors.green, fontWeight: '800' }}>{language.toUpperCase()}</Text>
+          </Pressable>
         </View>
 
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>{isSignUp ? 'JOIN THE NETWORK' : 'WELCOME BACK'}</Text>
-          <Text style={styles.title}>{isSignUp ? 'Your next trip starts here.' : 'Every journey, handled better.'}</Text>
-          <Text style={styles.subtitle}>{isSignUp ? 'Create a secure account in a few simple steps.' : 'Reliable rides across Yaoundé, with people you can trust.'}</Text>
+          <Text style={styles.eyebrow}>{t(isSignUp ? 'JOIN THE NETWORK' : 'WELCOME BACK')}</Text>
+          <Text style={styles.title}>{t(isSignUp ? 'Your next trip starts here.' : 'Every journey, handled better.')}</Text>
+          <Text style={styles.subtitle}>{t(isSignUp ? 'Create a secure account in a few simple steps.' : 'Reliable rides across Yaoundé, with people you can trust.')}</Text>
         </View>
 
         <View style={styles.card}>
           {isSignUp && role === 'DRIVER' && <View style={styles.progress}><View style={[styles.progressFill, { width: step === 1 ? '50%' : '100%' }]} /></View>}
           <View style={styles.cardHeader}>
-            <View><Text style={styles.cardTitle}>{isSignUp ? (role === 'DRIVER' && step === 2 ? 'Driver verification' : 'Create your account') : 'Sign in'}</Text><Text style={styles.cardHint}>{isSignUp && role === 'DRIVER' && step === 2 ? 'Help passengers recognize you on every ride.' : 'Your details stay private and secure.'}</Text></View>
+            <View><Text style={styles.cardTitle}>{t(isSignUp ? (role === 'DRIVER' && step === 2 ? 'Driver verification' : 'Create your account') : 'Sign in')}</Text><Text style={styles.cardHint}>{t(isSignUp && role === 'DRIVER' && step === 2 ? 'Help passengers recognize you on every ride.' : 'Your details stay private and secure.')}</Text></View>
             <Ionicons name={isSignUp && role === 'DRIVER' && step === 2 ? 'shield-checkmark-outline' : 'lock-closed-outline'} size={24} color={colors.green} />
           </View>
 
           {!isSignUp ? <>
             {input('username', 'Email or username', 'person-outline', { autoCapitalize: 'none', keyboardType: 'email-address' })}
-            <View style={styles.inputWrap}><Ionicons name="lock-closed-outline" size={19} color={colors.muted} /><TextInput style={styles.input} placeholder="Password" placeholderTextColor="#94A39D" secureTextEntry={!showPassword} value={form.password} onChangeText={(value) => update('password', value)} /><Pressable onPress={() => setShowPassword((value) => !value)}><Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={19} color={colors.muted} /></Pressable></View>
+            <View style={styles.inputWrap}><Ionicons name="lock-closed-outline" size={19} color={colors.muted} /><TextInput style={styles.input} placeholder={t('Password')} placeholderTextColor="#94A39D" secureTextEntry={!showPassword} value={form.password} onChangeText={(value) => update('password', value)} /><Pressable onPress={() => setShowPassword((value) => !value)}><Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={19} color={colors.muted} /></Pressable></View>
           </> : step === 1 ? <>
             <View style={styles.nameRow}>{input('firstName', 'First name', 'person-outline')}<View style={styles.nameGap} />{input('lastName', 'Last name', 'person-outline')}</View>
             {input('email', 'Email address', 'mail-outline', { keyboardType: 'email-address', autoCapitalize: 'none' })}
             {input('phone', 'Phone number (optional)', 'call-outline', { keyboardType: 'phone-pad' })}
             {input('username', 'Choose a username', 'at-outline', { autoCapitalize: 'none' })}
             <View style={styles.inputWrap}><Ionicons name="lock-closed-outline" size={19} color={colors.muted} /><TextInput style={styles.input} placeholder="Create a password (8+ characters)" placeholderTextColor="#94A39D" secureTextEntry={!showPassword} value={form.password} onChangeText={(value) => update('password', value)} /><Pressable onPress={() => setShowPassword((value) => !value)}><Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={19} color={colors.muted} /></Pressable></View>
-            <Text style={styles.fieldLabel}>I want to join as</Text>
-            <View style={styles.roleRow}>{(['PASSENGER', 'DRIVER'] as Role[]).map((item) => <Pressable key={item} style={[styles.roleChoice, role === item && styles.roleChoiceActive]} onPress={() => { setRole(item); setStep(1); }}><Ionicons name={item === 'DRIVER' ? 'car-outline' : 'person-outline'} size={20} color={role === item ? '#FFFFFF' : colors.muted} /><Text style={[styles.roleText, role === item && styles.roleTextActive]}>{item === 'DRIVER' ? 'Driver' : 'Passenger'}</Text></Pressable>)}</View>
+            <Text style={styles.fieldLabel}>{t('I want to join as')}</Text>
+            <View style={styles.roleRow}>{(['PASSENGER', 'DRIVER'] as Role[]).map((item) => <Pressable key={item} style={[styles.roleChoice, role === item && styles.roleChoiceActive]} onPress={() => { setRole(item); setStep(1); }}><Ionicons name={item === 'DRIVER' ? 'car-outline' : 'person-outline'} size={20} color={role === item ? '#FFFFFF' : colors.muted} /><Text style={[styles.roleText, role === item && styles.roleTextActive]}>{item === 'DRIVER' ? t('Driver') : t('Passenger')}</Text></Pressable>)}</View>
           </> : <>
-            <View style={styles.sectionLabel}><Ionicons name="document-text-outline" size={18} color={colors.green} /><Text style={styles.fieldLabel}>Driving license</Text></View>
-            {input('licenseNumber', 'License number', 'card-outline', { autoCapitalize: 'characters' })}
+            <View style={styles.sectionLabel}><Ionicons name="document-text-outline" size={18} color={colors.green} /><Text style={styles.fieldLabel}>{t('Driving license')}</Text></View>
+            {input('licenseNumber', t('License number'), 'card-outline', { autoCapitalize: 'characters' })}
             {uploadTile('licenseImage', 'Add license photo', 'Clear front photo, JPG or PNG', 'document-attach-outline')}
-            <View style={styles.sectionLabel}><Ionicons name="car-outline" size={18} color={colors.green} /><Text style={styles.fieldLabel}>Vehicle details</Text></View>
+            <View style={styles.sectionLabel}><Ionicons name="car-outline" size={18} color={colors.green} /><Text style={styles.fieldLabel}>{t('Vehicle details')}</Text></View>
             <View style={styles.nameRow}>{input('vehicleMake', 'Make (Toyota)', 'car-outline')}<View style={styles.nameGap} />{input('vehicleModel', 'Model (Yaris)', 'car-outline')}</View>
             <View style={styles.nameRow}>{input('vehicleYear', 'Year', 'calendar-outline', { keyboardType: 'number-pad' })}<View style={styles.nameGap} />{input('vehicleColor', 'Color', 'color-palette-outline')}</View>
             {input('vehiclePlate', 'License plate', 'pricetag-outline', { autoCapitalize: 'characters' })}
-            <Text style={styles.fieldLabel}>Service category</Text>
+            <Text style={styles.fieldLabel}>{t('Service category')}</Text>
             <View style={styles.categoryRow}>{['ECONOMY', 'COMFORT', 'MOTO'].map((item) => <Pressable key={item} style={[styles.category, form.vehicleCategory === item && styles.categoryActive]} onPress={() => update('vehicleCategory', item)}><Text style={[styles.categoryText, form.vehicleCategory === item && styles.categoryTextActive]}>{item === 'COMFORT' ? 'Comfort' : item[0] + item.slice(1).toLowerCase()}</Text></Pressable>)}</View>
             {uploadTile('vehicleImage', 'Add vehicle photo', 'Show the full vehicle clearly', 'camera-outline')}
-            <View style={styles.notice}><Ionicons name="information-circle-outline" size={18} color={colors.blue} /><Text style={styles.noticeText}>Your profile will be reviewed before you receive passenger requests.</Text></View>
+            <View style={styles.notice}><Ionicons name="information-circle-outline" size={18} color={colors.blue} /><Text style={styles.noticeText}>{t('Your profile will be reviewed before you receive passenger requests.')}</Text></View>
           </>}
 
-          <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed]} onPress={handleAuth} disabled={loading}>{loading ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.primaryText}>{!isSignUp ? 'Sign in' : role === 'DRIVER' && step === 1 ? 'Continue to verification' : 'Submit for review'}</Text><Ionicons name="arrow-forward" size={19} color="#FFFFFF" /></>}</Pressable>
-          {isSignUp && role === 'DRIVER' && step === 2 && <Pressable style={styles.backButton} onPress={() => setStep(1)}><Ionicons name="arrow-back" size={17} color={colors.green} /><Text style={styles.backText}>Back to account details</Text></Pressable>}
-          <Pressable style={styles.switchButton} onPress={switchMode}><Text style={styles.switchText}>{isSignUp ? 'Already have an account? Sign in' : 'New to GRAP? Create an account'}</Text></Pressable>
+          <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed]} onPress={handleAuth} disabled={loading}>{loading ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.primaryText}>{t(!isSignUp ? 'Sign in' : role === 'DRIVER' && step === 1 ? 'Continue to verification' : 'Submit for review')}</Text><Ionicons name="arrow-forward" size={19} color="#FFFFFF" /></>}</Pressable>
+          {isSignUp && role === 'DRIVER' && step === 2 && <Pressable style={styles.backButton} onPress={() => setStep(1)}><Ionicons name="arrow-back" size={17} color={colors.green} /><Text style={styles.backText}>{t('Back to account details')}</Text></Pressable>}
+          <Pressable style={styles.switchButton} onPress={switchMode}><Text style={styles.switchText}>{t(isSignUp ? 'Already have an account? Sign in' : 'New to GRAP? Create an account')}</Text></Pressable>
         </View>
-        <Text style={styles.footer}>By continuing, you agree to GRAP's terms and privacy policy.</Text>
+        <Text style={styles.footer}>{t("By continuing, you agree to GRAP's terms and privacy policy.")}</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

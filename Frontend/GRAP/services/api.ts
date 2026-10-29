@@ -5,17 +5,28 @@ import { safeStorage } from './storage';
 const isWeb = Platform.OS === 'web';
 
 const getBackendUrl = () => {
+  const configuredUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, '');
+  }
+
   if (isWeb) {
     return 'http://localhost:8000/api';
   }
 
   const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest?.debuggerHost;
   if (hostUri) {
-    const lastColon = hostUri.lastIndexOf(':');
-    const ip = lastColon >= 0 ? hostUri.substring(0, lastColon) : hostUri;
-    const cleanedIp = ip.replace(/^\[|\]$/g, '');
-    if (cleanedIp && cleanedIp !== 'localhost' && cleanedIp !== '127.0.0.1') {
-      return `http://${cleanedIp}:8000/api`;
+    const hostname = hostUri.replace(/^https?:\/\//, '').split(':')[0];
+    const octets: number[] = hostname.split('.').map((part: string) => Number(part));
+    const isPrivateIpv4 =
+      octets.length === 4 &&
+      octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) &&
+      (octets[0] === 10 ||
+        (octets[0] === 192 && octets[1] === 168) ||
+        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31));
+
+    if (isPrivateIpv4) {
+      return `http://${hostname}:8000/api`;
     }
   }
   return 'https://mygrap.onrender.com/api';
@@ -39,8 +50,38 @@ export interface User {
   is_superuser?: boolean;
 }
 
+export interface PlaceDetail {
+  id: number;
+  slug: string;
+  name: string;
+  category: string;
+  categoryCode: 'DINING' | 'PARKS' | 'CULTURE' | 'SHOPPING' | 'SPORTS';
+  zone: string;
+  icon: string;
+  latitude: number;
+  longitude: number;
+  description: string;
+  highlights: string[];
+  searchKeywords: string[];
+  photoUrl: string;
+  photoCredit: string;
+  photoLicense: string;
+  photoSourceUrl: string;
+  mapSourceUrl: string;
+}
+
 class ApiService {
   private token: string | null = null;
+
+  async warmUp() {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+      await fetch(`${API_BASE_URL}/auth/me/`, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
 
   async initToken() {
     try {
@@ -74,13 +115,21 @@ class ApiService {
     }
 
     let response: Response;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
       response = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...options,
         headers,
+        signal: options.signal || controller.signal,
       });
     } catch (err: any) {
+      if (controller.signal.aborted) {
+        throw new Error('The server is taking too long to respond. It may be waking up; please try again.');
+      }
       throw new Error(`Cannot connect to Backend server (${API_BASE_URL}). Please ensure Django server is running.`);
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     if (!response.ok) {
@@ -143,10 +192,51 @@ class ApiService {
     });
   }
 
-  async getPlaceRecommendation(query: string, places: Array<{ name: string; zone: string; description: string }>) {
-    return this.request<{ answer: string }>('/ai/place-recommendation/', {
+  async getPlaces() {
+    const records = await this.request<Array<{
+      id: number;
+      slug: string;
+      name: string;
+      category: string;
+      category_code: PlaceDetail['categoryCode'];
+      zone: string;
+      icon: string;
+      latitude: number;
+      longitude: number;
+      description: string;
+      highlights: string[];
+      search_keywords: string[];
+      photo_url: string;
+      photo_credit: string;
+      photo_license: string;
+      photo_source_url: string;
+      map_source_url: string;
+    }>>('/places/');
+    return records.map((place): PlaceDetail => ({
+      id: place.id,
+      slug: place.slug,
+      name: place.name,
+      category: place.category,
+      categoryCode: place.category_code,
+      zone: place.zone,
+      icon: place.icon,
+      latitude: Number(place.latitude),
+      longitude: Number(place.longitude),
+      description: place.description,
+      highlights: place.highlights || [],
+      searchKeywords: place.search_keywords || [],
+      photoUrl: place.photo_url,
+      photoCredit: place.photo_credit,
+      photoLicense: place.photo_license,
+      photoSourceUrl: place.photo_source_url,
+      mapSourceUrl: place.map_source_url,
+    }));
+  }
+
+  async getPlaceRecommendation(query: string) {
+    return this.request<{ answer: string; source: string; recommended_place_ids: number[] }>('/ai/place-recommendation/', {
       method: 'POST',
-      body: JSON.stringify({ query, places }),
+      body: JSON.stringify({ query }),
     });
   }
 
@@ -285,6 +375,17 @@ class ApiService {
 
   async getRideRequests() {
     return this.request<any[]>('/driver/ride-requests/');
+  }
+
+  async getDriverActiveRide() {
+    return this.request<any>('/driver/active-ride/');
+  }
+
+  async updateDriverLocation(lat: number, lng: number) {
+    return this.request<any>('/driver/status/', {
+      method: 'POST',
+      body: JSON.stringify({ latitude: lat, longitude: lng }),
+    });
   }
 
   async acceptRide(rideId: number) {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import LeafletMap from '../../components/LeafletMap';
 import { api } from '../../services/api';
 import { searchPlaces, reverseGeocode, PlaceSuggestion, calculateMultiFactorCategoryFare, getDrivingDistanceKm } from '../../services/geocoding';
@@ -13,6 +13,11 @@ import * as Location from 'expo-location';
 
 export default function PassengerHomeScreen() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{
+    destination_name?: string;
+    destination_lat?: string;
+    destination_lng?: string;
+  }>();
   const { colors, mode } = useTheme();
   const { t } = useLanguage();
   const { user } = useAuth();
@@ -58,11 +63,11 @@ export default function PassengerHomeScreen() {
     if (user && user.role === 'PASSENGER' && !user.is_verified) {
       const reminder = setTimeout(() => {
         Alert.alert(
-          'Verify your email',
-          `Protect your GRAP account by verifying ${user.email}. You can do this from your Profile.`,
+          t('Verify your email'),
+          t('Protect your GRAP account by verifying {email}. You can do this from your Profile.').replace('{email}', user.email),
           [
-            { text: 'Later', style: 'cancel' },
-            { text: 'Open Profile', onPress: () => router.push('/profile') },
+            { text: t('Later'), style: 'cancel' },
+            { text: t('Open Profile'), onPress: () => router.push('/profile') },
           ],
         );
       }, 900);
@@ -88,8 +93,8 @@ export default function PassengerHomeScreen() {
 
   const handleSyncCurrentLocation = async () => {
     const applyPosition = async (latitude: number, longitude: number, isFallback = false) => {
-      const lat = Number(latitude.toFixed(6));
-      const lng = Number(longitude.toFixed(6));
+      const lat = Number(latitude);
+      const lng = Number(longitude);
       setPickupLat(lat);
       setPickupLng(lng);
 
@@ -229,6 +234,22 @@ export default function PassengerHomeScreen() {
     }
   };
 
+  useEffect(() => {
+    const name = typeof routeParams.destination_name === 'string' ? routeParams.destination_name.trim() : '';
+    const latitude = Number(routeParams.destination_lat);
+    const longitude = Number(routeParams.destination_lng);
+    if (!name || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    setDestName(name);
+    setDestLat(latitude);
+    setDestLng(longitude);
+    setShowSuggestions(false);
+    setSharedMatches(null);
+    if (categories.length > 0) {
+      void calculateFaresForCategories(categories, latitude, longitude);
+    }
+  }, [routeParams.destination_name, routeParams.destination_lat, routeParams.destination_lng, categories]);
+
   const selectPreset = (pName: string, pLat: number, pLng: number, dName: string, dLat: number, dLng: number) => {
     setPickupName(pName);
     setPickupLat(pLat);
@@ -257,7 +278,7 @@ export default function PassengerHomeScreen() {
       });
       setSharedMatches(res.shareable_rides);
     } catch (e: any) {
-      Alert.alert('Search Error', e.message || 'Could not search shared rides');
+      Alert.alert(t('Search Error'), e.message ? t(e.message) : t('Could not search shared rides'));
     } finally {
       setSearchingShared(false);
     }
@@ -300,18 +321,20 @@ export default function PassengerHomeScreen() {
         router.push({ pathname: '/rides', params });
       } else {
         Alert.alert(
-          rideMode === 'SHARED' ? 'Shareable Ride Requested!' : 'Private Ride Requested!',
-          `Ride #${rideId} requested. Payment: ${paymentMethod}.\nMatching driver...`,
+          t(rideMode === 'SHARED' ? 'Shareable Ride Requested!' : 'Private Ride Requested!'),
+          t('Ride #{id} requested. Payment: {method}.\nMatching driver...')
+            .replace('{id}', String(rideId))
+            .replace('{method}', t(paymentMethod)),
           [
             {
-              text: 'Track Ride',
+              text: t('Track Ride'),
               onPress: () => router.push({ pathname: '/rides', params }),
             },
           ]
         );
       }
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to request ride');
+      Alert.alert(t('Error'), e.message ? t(e.message) : t('Failed to request ride'));
     } finally {
       setRequesting(false);
     }
@@ -355,11 +378,14 @@ export default function PassengerHomeScreen() {
         router.push({ pathname: '/rides', params });
       } else {
         Alert.alert(
-          'Joined Shared Ride!',
-          `Joined ride #${rideId}.\nFare: ${res?.allocated_fare || match.proportional_shared_fare} FCFA via ${paymentMethod}`,
+          t('Joined Shared Ride!'),
+          t('Joined ride #{id}.\nFare: {fare} FCFA via {method}')
+            .replace('{id}', String(rideId))
+            .replace('{fare}', String(res?.allocated_fare || match.proportional_shared_fare))
+            .replace('{method}', t(paymentMethod)),
           [
             {
-              text: 'Track Ride',
+              text: t('Track Ride'),
               onPress: () => router.push({ pathname: '/rides', params }),
             },
           ]
@@ -383,13 +409,14 @@ export default function PassengerHomeScreen() {
         destLng={destLng}
         pickupName={pickupName}
         destName={destName}
+        showRoute={Boolean(destName.trim())}
         onSelectLocation={(lat, lng) => { void handleMapLocationSelected(lat, lng); }}
       />
 
       {showGreeting && !showSuggestions && (
         <View style={[styles.greetingBanner, { backgroundColor: colors.card, borderColor: colors.primary, top: verticalScale(6), left: horizontalScale(20), right: horizontalScale(20), minHeight: verticalScale(42), paddingHorizontal: horizontalScale(13) }]}>
           <Ionicons name="sunny-outline" size={moderateScale(18)} color={colors.primary} />
-          <Text style={[styles.greetingText, { color: colors.text, fontSize: fontScale(12) }]}>Welcome to GRAP. Where are you headed?</Text>
+          <Text style={[styles.greetingText, { color: colors.text, fontSize: fontScale(12) }]}>{t('Welcome to GRAP. Where are you headed?')}</Text>
         </View>
       )}
 
@@ -418,7 +445,7 @@ export default function PassengerHomeScreen() {
               setSuggestions(res);
               setShowSuggestions(true);
             }}
-            placeholder="Where are we going today?"
+            placeholder={t('Where are we going today?')}
             placeholderTextColor={colors.subText}
           />
           {destName.length > 0 && (
@@ -515,7 +542,7 @@ export default function PassengerHomeScreen() {
                 style={[styles.routeInput, { color: colors.text, fontSize: fontScale(14), height: verticalScale(36) }]}
                 value={pickupName}
                 onChangeText={setPickupName}
-                placeholder="Pickup Location"
+                placeholder={t('Pickup Location')}
                 placeholderTextColor={colors.subText}
               />
               <TouchableOpacity
@@ -534,7 +561,7 @@ export default function PassengerHomeScreen() {
                 style={[styles.routeInput, { color: colors.text, fontSize: fontScale(14), height: verticalScale(36) }]}
                 value={destName}
                 onChangeText={setDestName}
-                placeholder="Where are we going today?"
+                placeholder={t('Where are we going today?')}
               />
             </View>
           </View>
@@ -625,7 +652,7 @@ export default function PassengerHomeScreen() {
                 {t('voluntaryShareTab')}
               </Text>
               <View style={[styles.saveBadge, { backgroundColor: colors.accent, paddingHorizontal: horizontalScale(6), paddingVertical: verticalScale(2), borderRadius: moderateScale(4) }]}>
-                <Text style={[styles.saveBadgeText, { color: '#172018', fontSize: fontScale(9) }]}>SAVE 40%</Text>
+                <Text style={[styles.saveBadgeText, { color: '#172018', fontSize: fontScale(9) }]}>{t('SAVE 40%')}</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -666,7 +693,7 @@ export default function PassengerHomeScreen() {
           </ScrollView>
 
           {/* PROFESSIONAL VECTOR BRANDING PAYMENT METHOD SELECTOR */}
-          <Text style={[styles.sectionTitle, { color: colors.subText, fontSize: fontScale(12) }]}>Payment Method (Mode de Paiement)</Text>
+          <Text style={[styles.sectionTitle, { color: colors.subText, fontSize: fontScale(12) }]}>{t('Payment Method (Mode de Paiement)')}</Text>
           <View style={[styles.paymentMethodRow, { gap: horizontalScale(8), marginBottom: verticalScale(12) }]}>
             {/* MTN Mobile Money Pill */}
             <TouchableOpacity
@@ -791,7 +818,7 @@ export default function PassengerHomeScreen() {
                         )}
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={{ color: colors.subText, fontSize: fontScale(10) }}>Your share</Text>
+                        <Text style={{ color: colors.subText, fontSize: fontScale(10) }}>{t('Your share')}</Text>
                         <Text style={[styles.proportionalFare, { color: colors.primary, fontSize: fontScale(16), fontWeight: '800' }]}>
                           {Math.round(m.proportional_shared_fare).toLocaleString()} FCFA
                         </Text>

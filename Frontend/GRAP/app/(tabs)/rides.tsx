@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Alert, Modal, Share, Platform, Image, Linking } from 'react-native';
+import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import GoogleDriverMap from '../../components/GoogleDriverMap';
+import RideLiveMap from '../../components/RideLiveMap';
 import { api } from '../../services/api';
 import { activeRideStorage, loyaltyStorage, dismissedRideStorage, savingsStorage } from '../../services/storage';
 import { useTheme } from '../../context/ThemeContext';
@@ -10,6 +11,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { useResponsive, responsiveContainerStyle } from '../../utils/responsive';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { useRideLocationTracking } from '../../hooks/useRideLocationTracking';
 
 interface AlternativeDriverProposal {
   id: string;
@@ -43,6 +45,8 @@ export default function PassengerRidesScreen() {
   const paramDestLng = parseFloat(params.dest_lng as string) || 11.5180;
 
   const dismissedRideIdsRef = useRef<Set<string>>(new Set());
+  const previousRideStatusRef = useRef<{ rideId: string; status: string } | null>(null);
+  const welcomedRideIdsRef = useRef<Set<string>>(new Set());
 
   const [activeRide, setActiveRide] = useState<any | null>(null);
   const [completedRides, setCompletedRides] = useState<any[]>([]);
@@ -59,9 +63,6 @@ export default function PassengerRidesScreen() {
   const [noDriverAvailable, setNoDriverAvailable] = useState(false);
   const [showPaymentPrompt, setShowPaymentPrompt] = useState(false);
 
-  const [cashPin, setCashPin] = useState('4892');
-  const [inputPin, setInputPin] = useState('');
-  const [isVerified, setIsVerified] = useState(false);
 
   // CAMPAY MOBILE MONEY STATE
   const [momoPhone, setMomoPhone] = useState('677123456');
@@ -75,12 +76,47 @@ export default function PassengerRidesScreen() {
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [ratingScore, setRatingScore] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
+  const [ratingPaymentMessage, setRatingPaymentMessage] = useState<string | null>(null);
   const [completedRideId, setCompletedRideId] = useState<number | null>(null);
   const [submittingRating, setSubmittingRating] = useState(false);
 
   // DYNAMIC DRIVER PROPOSALS
   const [driverProposals, setDriverProposals] = useState<AlternativeDriverProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(false);
+
+  const announceRideWelcome = (rideId: string | number) => {
+    const id = String(rideId);
+    if (welcomedRideIdsRef.current.has(id)) return;
+
+    welcomedRideIdsRef.current.add(id);
+    Speech.speak('Bienvenue sur GRAP', {
+      language: 'fr-FR',
+      rate: 0.95,
+      onError: (error) => console.error('Unable to play trip welcome message:', error),
+    });
+  };
+
+  useEffect(() => {
+    if (!activeRide?.id || !activeRide?.status) return;
+
+    const rideId = String(activeRide.id);
+    const previous = previousRideStatusRef.current;
+    if (
+      previous?.rideId === rideId &&
+      previous.status !== 'DRIVER_AT_PICKUP' &&
+      activeRide.status === 'DRIVER_AT_PICKUP'
+    ) {
+      announceRideWelcome(rideId);
+    }
+
+    previousRideStatusRef.current = { rideId, status: activeRide.status };
+  }, [activeRide?.id, activeRide?.status]);
+
+  useEffect(() => {
+    if (activeRide?.status === 'ARRIVED_AT_DESTINATION') {
+      setShowPaymentPrompt(true);
+    }
+  }, [activeRide?.id, activeRide?.status]);
 
   const loadDriverProposals = async () => {
     setLoadingProposals(true);
@@ -97,7 +133,7 @@ export default function PassengerRidesScreen() {
           fare,
           driverName: d.driver_name || 'Driver',
           vehicleInfo: d.vehicle_info || 'Vehicle',
-          rating: `${d.rating_avg || 4.9} (${d.total_rides || 0} rides)`,
+          rating: `${d.rating_avg ?? 0} (${d.total_rides ?? 0} rides)`,
           eta: '2 mins away',
           distance: '1.0 km',
           vehicleType: categoryCode === 'MOTO' ? 'MOTO' : 'CAR',
@@ -122,12 +158,6 @@ export default function PassengerRidesScreen() {
   useEffect(() => {
     loadDriverProposals();
   }, []);
-
-  useEffect(() => {
-    if (activeRide?.pickup_lat && activeRide?.pickup_lng) {
-      setDriverPosition({ lat: activeRide.pickup_lat + 0.005, lng: activeRide.pickup_lng + 0.005 });
-    }
-  }, [activeRide?.pickup_lat, activeRide?.pickup_lng]);
 
   useEffect(() => {
     if (activeRide && params.shared === '1') {
@@ -202,13 +232,17 @@ export default function PassengerRidesScreen() {
     return () => clearInterval(interval);
   }, [activeRide?.id]);
 
-  useWebSocket({
+  const rideSocket = useWebSocket({
     rideId: activeRide?.id,
     onMessage: (data) => {
       const eventType = data.type || data.event;
       const eventData = data.data || data;
 
-      if (eventType === 'participant_joined') {
+      if (eventType === 'driver_location_updated') {
+        const lat = Number(eventData.latitude);
+        const lng = Number(eventData.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) setDriverPosition({ lat, lng });
+      } else if (eventType === 'participant_joined') {
         setParticipants((prev) => [...prev, eventData]);
       } else if (eventType === 'ride_cancelled') {
         const cancelledId = eventData?.ride_id || activeRide?.id || paramRideId;
@@ -216,7 +250,7 @@ export default function PassengerRidesScreen() {
           dismissedRideIdsRef.current.add(String(cancelledId));
           dismissedRideStorage.addId(cancelledId);
         }
-        Alert.alert('Ride Cancelled', 'This ride has been cancelled.');
+        Alert.alert(t('Ride Cancelled'), t('This ride has been cancelled.'));
         activeRideStorage.clear();
         setActiveRide(null);
         setPassengerAccepted(false);
@@ -226,19 +260,19 @@ export default function PassengerRidesScreen() {
         router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
       } else if (eventType === 'ride_completed') {
         const finishedId = eventData?.ride_id || activeRide?.id || paramRideId;
-        if (finishedId) {
-          dismissedRideIdsRef.current.add(String(finishedId));
-          dismissedRideStorage.addId(finishedId);
-        }
-        activeRideStorage.clear();
-        setActiveRide(null);
-        setPassengerAccepted(false);
-        setAcceptedRideId(null);
-        setParticipants([]);
         setShowPaymentPrompt(false);
-        router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
         if (finishedId) {
+          setActiveRide((prev: any) => prev
+            ? { ...prev, status: 'COMPLETED' }
+            : {
+                id: finishedId,
+                status: 'COMPLETED',
+                pickup_name: paramPickup,
+                destination_name: paramDest,
+                payment_method: paramPay,
+              });
           setCompletedRideId(Number(finishedId));
+          setRatingPaymentMessage(t('Payment confirmed. Please rate your driver.'));
           setShowRatingModal(true);
         }
         api.getMyRides().then((res) => {
@@ -246,21 +280,25 @@ export default function PassengerRidesScreen() {
         }).catch(() => {});
       } else if (eventType === 'ride_status_updated') {
         const newStatus = eventData?.status;
+        if (newStatus === 'DRIVER_AT_PICKUP') {
+          const arrivedRideId = eventData?.ride_id || activeRide?.id || paramRideId;
+          if (arrivedRideId) announceRideWelcome(arrivedRideId);
+        }
         if (newStatus === 'COMPLETED') {
           const finishedId = eventData?.ride_id || activeRide?.id || paramRideId;
-          if (finishedId) {
-            dismissedRideIdsRef.current.add(String(finishedId));
-            dismissedRideStorage.addId(finishedId);
-          }
-          activeRideStorage.clear();
-          setActiveRide(null);
-          setPassengerAccepted(false);
-          setAcceptedRideId(null);
-          setParticipants([]);
           setShowPaymentPrompt(false);
-          router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
           if (finishedId) {
+            setActiveRide((prev: any) => prev
+              ? { ...prev, status: 'COMPLETED' }
+              : {
+                  id: finishedId,
+                  status: 'COMPLETED',
+                  pickup_name: paramPickup,
+                  destination_name: paramDest,
+                  payment_method: paramPay,
+                });
             setCompletedRideId(Number(finishedId));
+            setRatingPaymentMessage(t('Payment confirmed. Please rate your driver.'));
             setShowRatingModal(true);
           }
           api.getMyRides().then((res) => {
@@ -268,6 +306,14 @@ export default function PassengerRidesScreen() {
           }).catch(() => {});
         } else if (newStatus) {
           setActiveRide((prev: any) => (prev ? { ...prev, status: newStatus } : null));
+          if (newStatus === 'ARRIVED_AT_DESTINATION') {
+            api.getMyRides().then((rides) => {
+              const updatedRide = rides.find((ride) => String(ride.id) === String(eventData?.ride_id || activeRide?.id));
+              if (updatedRide) {
+                setActiveRide((prev: any) => prev ? { ...prev, ...updatedRide } : updatedRide);
+              }
+            }).catch((error) => console.error('Could not load destination payment PIN:', error));
+          }
         }
       } else if (eventType === 'ride_accepted') {
         setActiveRide((prev: any) => (prev ? { ...prev, ...eventData, status: 'ACCEPTED' } : eventData));
@@ -276,20 +322,35 @@ export default function PassengerRidesScreen() {
     reconnectInterval: 2000,
   });
 
+  const passengerTracking = useRideLocationTracking({
+    rideId: activeRide?.id,
+    enabled: Boolean(
+      activeRide?.driver &&
+      ['ACCEPTED', 'DRIVER_ARRIVING'].includes(activeRide.status)
+    ),
+    role: 'passenger',
+    isConnected: rideSocket.isConnected,
+    send: rideSocket.send,
+  });
+
+  // Sync active ride status periodically from backend
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    const handler = (event: MessageEvent) => {
-      const data = event.data;
-      const msg = typeof data === 'string' ? data : data?.type;
-      if (msg === 'ARRIVED_PICKUP') {
-        handleAutomatedPickupArrival();
-      } else if (msg === 'ARRIVED_DESTINATION') {
-        handleAutomatedDestinationArrival();
+    if (!activeRide?.id || activeRide.status === 'COMPLETED') return;
+    const pollInterval = setInterval(async () => {
+      try {
+        const rides = await api.getMyRides();
+        if (Array.isArray(rides)) {
+          const updated = rides.find((r: any) => Number(r.id) === Number(activeRide.id));
+          if (updated && updated.status !== activeRide.status) {
+            setActiveRide((prev: any) => ({ ...prev, ...updated }));
+          }
+        }
+      } catch (e) {
+        // ignore
       }
-    };
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
-  }, []);
+    }, 3500);
+    return () => clearInterval(pollInterval);
+  }, [activeRide?.id, activeRide?.status]);
 
   // SAVE ACTIVE RIDE TO STORAGE EVERY TIME IT UPDATES (PERSISTENT ACROSS TAB SWITCHES)
   useEffect(() => {
@@ -395,8 +456,8 @@ export default function PassengerRidesScreen() {
           const newRideObj = {
             id: activeParamId,
             status: 'ACCEPTED',
-            driver_name: firstProposal?.driverName || 'Paul Nkoa',
-            vehicle_info: firstProposal?.vehicleInfo || 'Toyota Yaris • CE-992-AA',
+            driver_name: firstProposal?.driverName || null,
+            vehicle_info: firstProposal?.vehicleInfo || null,
             pickup_name: paramPickup,
             pickup_lat: paramPickupLat,
             pickup_lng: paramPickupLng,
@@ -411,7 +472,6 @@ export default function PassengerRidesScreen() {
             estimated_fare: isJoinerParam ? joinedFareParam : undefined,
             final_fare: isJoinerParam ? joinedFareParam : undefined,
             primary_estimated_fare: isJoinerParam ? (joinedFareParam + 850) : undefined,
-            cash_otp: '4892',
             passengerAccepted: isJoinerParam,
           };
           setActiveRide(newRideObj);
@@ -500,11 +560,11 @@ export default function PassengerRidesScreen() {
             distance_km: activeJoined.solo_distance_km || 3.5,
             pickup_name: activeJoined.pickup_name || 'Pickup',
             destination_name: activeJoined.destination_name || 'Destination',
-            driver_name: activeJoined.driver_name || 'Paul Nkoa',
-            vehicle_info: 'Toyota Yaris • CE-992-AA',
+            driver_name: activeJoined.driver_name || 'Assigned Driver',
+            vehicle_info: activeJoined.vehicle_info || 'Verified Vehicle',
             driver_profile_picture_url: activeJoined.driver_profile_picture_url || '',
             driver_phone_number: activeJoined.driver_phone_number || '+237670003344',
-            cash_otp: activeJoined.cash_otp || '4892',
+            cash_otp: activeJoined.cash_otp || '',
             status: activeJoined.primary_status || 'ACCEPTED',
             passengerAccepted: true,
           };
@@ -539,7 +599,7 @@ export default function PassengerRidesScreen() {
         await Linking.openURL(url);
       }
     } catch (e) {
-      Alert.alert('Call', `Driver phone: ${activeRide?.driver_phone_number || '+237670003344'}`);
+      Alert.alert(t('Call'), `${t('Driver phone:')} ${activeRide?.driver_phone_number || '+237670003344'}`);
     }
   };
 
@@ -556,8 +616,8 @@ export default function PassengerRidesScreen() {
     });
 
     Alert.alert(
-      'Driver Accepted!',
-      `Driver ${activeRide?.driver_name || 'Paul Nkoa'} confirmed. Stage 1: En route to pick you up!`
+      t('Driver Accepted!'),
+      t('Driver {name} confirmed. Stage 1: En route to pick you up!').replace('{name}', activeRide?.driver_name || 'Paul Nkoa')
     );
   };
 
@@ -581,8 +641,8 @@ export default function PassengerRidesScreen() {
   // WHATSAPP / SECURITY CONTACT LIVE TRIP SHARING
   const handleShareTripWhatsApp = async () => {
     if (!activeRide) return;
-    const dName = activeRide.driver_name || 'Paul Nkoa';
-    const vInfo = activeRide.vehicle_info || 'Toyota Yaris CE-992-AA';
+    const dName = activeRide.driver_name || 'Assigned Driver';
+    const vInfo = activeRide.vehicle_info || 'Verified Vehicle';
     const pName = activeRide.pickup_name || paramPickup;
     const dDest = activeRide.destination_name || paramDest;
 
@@ -590,7 +650,7 @@ export default function PassengerRidesScreen() {
       `I am on a trip with driver ${dName} (${vInfo}).\n` +
       `📍 From: ${pName}\n` +
       `🎯 To: ${dDest}\n` +
-      `🔒 Live Tracking Link: https://grap.cm/track/${activeRide.id || '4892'}`;
+      (activeRide.id ? `🔒 Live Tracking Link: https://grap.cm/track/${activeRide.id}` : '');
 
     try {
       await Share.share({ message });
@@ -619,8 +679,11 @@ export default function PassengerRidesScreen() {
     setNoDriverAvailable(false);
     setPassengerAccepted(true);
     Alert.alert(
-      'Category Switched!',
-      `Switched to ${alt.category} (${alt.fare}). Driver ${alt.driverName} is en route to pick you up!`
+      t('Category Switched!'),
+      t('Switched to {category} ({fare}). Driver {name} is en route to pick you up!')
+        .replace('{category}', alt.category)
+        .replace('{fare}', alt.fare)
+        .replace('{name}', alt.driverName)
     );
   };
 
@@ -641,18 +704,18 @@ export default function PassengerRidesScreen() {
     };
 
     if (Platform.OS === 'web') {
-      const confirmed = window.confirm('Cancel Ride Request?\n\nAre you sure you want to cancel this ride request?');
+      const confirmed = window.confirm(`${t('Cancel Ride Request?')}\n\n${t('Are you sure you want to cancel this ride request?')}`);
       if (confirmed) {
         await performCancel();
       }
     } else {
       Alert.alert(
-        'Cancel Ride Request?',
-        'Are you sure you want to cancel this ride request?',
+        t('Cancel Ride Request?'),
+        t('Are you sure you want to cancel this ride request?'),
         [
-          { text: 'No, Keep Ride', style: 'cancel' },
+          { text: t('No, Keep Ride'), style: 'cancel' },
           {
-            text: 'Yes, Cancel Ride',
+            text: t('Yes, Cancel Ride'),
             style: 'destructive',
             onPress: performCancel,
           },
@@ -661,66 +724,8 @@ export default function PassengerRidesScreen() {
     }
   };
 
-  // VERIFY CASH PIN & ACCRUE +50 LOYALTY POINTS UPON RIDE COMPLETION
-  const verifyPin = async () => {
-    if (inputPin === cashPin || inputPin === '4892' || (activeRide?.cash_otp && inputPin === activeRide.cash_otp)) {
-      const rideId = activeRide?.id ? String(activeRide.id) : null;
-      const allIds = [rideId, activeRide?.shared_ride_id, activeRide?.participant_id, paramRideId].filter(Boolean);
-      for (const id of allIds) {
-        dismissedRideIdsRef.current.add(String(id));
-        await dismissedRideStorage.addId(id);
-      }
-
-      if (activeRide?.is_joiner && activeRide?.participant_id) {
-        try {
-          await api.confirmSharedPayment(activeRide.participant_id);
-        } catch (e) {
-          console.log('Error confirming shared cash payment on backend:', e);
-        }
-      } else if (rideId && !isNaN(Number(rideId))) {
-        try {
-          await api.confirmCashOTP(Number(rideId), inputPin);
-        } catch (e) {
-          console.log('Error confirming cash payment on backend:', e);
-        }
-      }
-      setIsVerified(true);
-      setShowPaymentPrompt(false);
-      const newPts = await loyaltyStorage.addPoints(50, user?.id);
-      if (activeRide?.is_shared || activeRide?.is_joiner || participants.length > 0) {
-        const savedAmount = activeRide?.is_joiner ? 650 : Math.max(650, participants.length * 650);
-        await savingsStorage.addSavings(savedAmount, user?.id);
-      }
-      Alert.alert(
-        'Trip Complete & Paid! 🎉',
-        `Thank you for riding with GRAP! Cash OTP verified.\n\n🏆 You earned +50 Loyalty Points! Total Balance: ${newPts} Pts.`
-      );
-      await activeRideStorage.clear();
-      setActiveRide(null);
-      setPassengerAccepted(false);
-      setAcceptedRideId(null);
-      setParticipants([]);
-      router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
-      if (rideId && !isNaN(Number(rideId))) {
-        setCompletedRideId(Number(rideId));
-        setShowRatingModal(true);
-      }
-      api.getMyRides().then((res) => {
-        if (Array.isArray(res)) setCompletedRides(res.filter((r) => r.status === 'COMPLETED'));
-      }).catch(() => {});
-    } else {
-      Alert.alert('Invalid PIN', 'The 4-digit PIN entered does not match your ride PIN.');
-    }
-  };
-
   const finalizePaymentSuccess = async (amountDue: number, methodLabel: string) => {
-    const rideId = activeRide?.id ? String(activeRide.id) : null;
-    const allIds = [rideId, activeRide?.shared_ride_id, activeRide?.participant_id, paramRideId].filter(Boolean);
-    for (const id of allIds) {
-      dismissedRideIdsRef.current.add(String(id));
-      await dismissedRideStorage.addId(id);
-    }
-
+    const rideId = activeRide?.id ? String(activeRide.id) : paramRideId || null;
     setShowPaymentPrompt(false);
     setCampayPolling(false);
     setCampayRef(null);
@@ -729,19 +734,32 @@ export default function PassengerRidesScreen() {
       const savedAmount = activeRide?.is_joiner ? 650 : Math.max(650, participants.length * 650);
       await savingsStorage.addSavings(savedAmount, user?.id);
     }
-    Alert.alert(
-      'Payment Completed! 🎉',
-      `${methodLabel} confirmed for ${amountDue.toLocaleString()} FCFA.\n\n🏆 You earned +50 Loyalty Points! Total Balance: ${newPts} Pts.`
-    );
-    await activeRideStorage.clear();
-    setActiveRide(null);
-    setPassengerAccepted(false);
-    setAcceptedRideId(null);
-    setParticipants([]);
-    router.setParams({ ride_id: '', shared: '', pay: '', pickup: '', dest: '', fare: '' });
     if (rideId && !isNaN(Number(rideId))) {
+      setActiveRide((prev: any) => prev
+        ? { ...prev, status: 'COMPLETED' }
+        : {
+            id: rideId,
+            status: 'COMPLETED',
+            pickup_name: paramPickup,
+            destination_name: paramDest,
+            payment_method: paramPay,
+          });
       setCompletedRideId(Number(rideId));
+      setRatingPaymentMessage(
+        t('{method} confirmed for {amount} FCFA. You earned {points} loyalty points.')
+          .replace('{method}', t(methodLabel))
+          .replace('{amount}', amountDue.toLocaleString())
+          .replace('{points}', String(newPts))
+      );
       setShowRatingModal(true);
+    } else {
+      Alert.alert(
+        t('Payment Completed! 🎉'),
+        t('{method} confirmed for {amount} FCFA.\n\n🏆 You earned +50 Loyalty Points! Total Balance: {points} Pts.')
+          .replace('{method}', t(methodLabel))
+          .replace('{amount}', amountDue.toLocaleString())
+          .replace('{points}', String(newPts))
+      );
     }
     api.getMyRides().then((res) => {
       if (Array.isArray(res)) setCompletedRides(res.filter((r) => r.status === 'COMPLETED'));
@@ -767,8 +785,12 @@ export default function PassengerRidesScreen() {
       setCampayPolling(true);
 
       Alert.alert(
-        'USSD Prompt Sent! 📲',
-        `A payment prompt of 25 FCFA (Demo Mode) has been sent to ${momoPhone} via ${res.operator || momoOperator}.\n\nDial ${res.ussd_code || '*126#'} or approve the prompt on your phone.`
+        t('USSD Prompt Sent! 📲'),
+        t('A payment prompt of {amount} FCFA has been sent to {phone} via {operator}.\n\nDial {ussd} or approve the prompt on your phone.')
+          .replace('{amount}', amountDue.toLocaleString())
+          .replace('{phone}', momoPhone)
+          .replace('{operator}', res.operator || momoOperator)
+          .replace('{ussd}', res.ussd_code || '*126#')
       );
 
       // Start automatic status polling
@@ -791,7 +813,7 @@ export default function PassengerRidesScreen() {
 
     } catch (e: any) {
       console.log('Campay initiate error:', e);
-      Alert.alert('Payment Error', e.message || 'Could not initiate Campay payment.');
+      Alert.alert(t('Payment Error'), e.message ? t(e.message) : t('Could not initiate Campay payment.'));
     } finally {
       setCampayLoading(false);
     }
@@ -807,12 +829,13 @@ export default function PassengerRidesScreen() {
         await finalizePaymentSuccess(amountDue, 'Campay Mobile Money');
       } else {
         Alert.alert(
-          'Payment Pending ⏳',
-          `Transaction is currently ${statusRes.status}. Please approve the prompt on your phone and try again.`
+          t('Payment Pending ⏳'),
+          t('Transaction is currently {status}. Please approve the prompt on your phone and try again.')
+            .replace('{status}', t(statusRes.status))
         );
       }
     } catch (e: any) {
-      Alert.alert('Status Check', e.message || 'Error checking payment status.');
+      Alert.alert(t('Status Check'), e.message ? t(e.message) : t('Error checking payment status.'));
     } finally {
       setCampayLoading(false);
     }
@@ -838,18 +861,28 @@ export default function PassengerRidesScreen() {
   };
 
   const handleSubmitRating = async () => {
-    if (completedRideId) {
-      dismissedRideIdsRef.current.add(String(completedRideId));
-      await dismissedRideStorage.addId(completedRideId);
-      setSubmittingRating(true);
-      try {
-        await api.rateDriver(completedRideId, ratingScore, ratingComment);
-      } catch (e) {
-        console.log('Rating submission error (non-blocking):', e);
-      }
+    if (!completedRideId) return;
+    setSubmittingRating(true);
+    try {
+      await api.rateDriver(completedRideId, ratingScore, ratingComment);
+    } catch (e) {
+      console.error('Rating submission failed:', e);
+      Alert.alert(t('Rating not submitted'), e instanceof Error ? t(e.message) : t('Please try again.'));
+      setSubmittingRating(false);
+      return;
     }
     setSubmittingRating(false);
+    await finishRatingFlow();
+  };
+
+  const finishRatingFlow = async () => {
+    const rideId = completedRideId;
+    if (rideId) {
+      dismissedRideIdsRef.current.add(String(rideId));
+      await dismissedRideStorage.addId(rideId);
+    }
     setShowRatingModal(false);
+    setRatingPaymentMessage(null);
     setRatingScore(5);
     setRatingComment('');
     setCompletedRideId(null);
@@ -868,13 +901,13 @@ export default function PassengerRidesScreen() {
     <View style={[styles.historySection, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
       <View style={styles.historyHeader}>
         <View>
-          <Text style={[styles.historyTitle, { color: colors.text }]}>Ride history</Text>
-          <Text style={[styles.historySubtitle, { color: colors.subText }]}>Completed trips from your account</Text>
+          <Text style={[styles.historyTitle, { color: colors.text }]}>{t('Ride history')}</Text>
+          <Text style={[styles.historySubtitle, { color: colors.subText }]}>{t('Completed trips from your account')}</Text>
         </View>
         <Ionicons name="time-outline" size={22} color={colors.primary} />
       </View>
       {completedRides.length === 0 && sharedHistory.length === 0 ? (
-        <Text style={[styles.historyEmpty, { color: colors.subText }]}>Your completed rides will appear here.</Text>
+        <Text style={[styles.historyEmpty, { color: colors.subText }]}>{t('Your completed rides will appear here.')}</Text>
       ) : <>{completedRides.map((ride) => (
         <View key={ride.id} style={[styles.historyRow, { borderTopColor: colors.cardBorder }]}>
           <View style={[styles.historyIcon, { backgroundColor: `${colors.primary}18` }]}>
@@ -910,7 +943,7 @@ export default function PassengerRidesScreen() {
     return (
       <View style={[styles.root, { backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.subText, marginTop: verticalScale(12), fontSize: fontScale(14) }]}>Loading active ride...</Text>
+        <Text style={[styles.loadingText, { color: colors.subText, marginTop: verticalScale(12), fontSize: fontScale(14) }]}>{t('Loading active ride...')}</Text>
       </View>
     );
   }
@@ -926,14 +959,14 @@ export default function PassengerRidesScreen() {
           <View style={[styles.emptyIconBadge, { backgroundColor: `${colors.primary}18`, width: moderateScale(70), height: moderateScale(70), borderRadius: moderateScale(35), marginBottom: verticalScale(16) }]}>
             <Ionicons name="car-outline" size={moderateScale(42)} color={colors.primary} />
           </View>
-          <Text style={[styles.emptyTitle, { color: colors.text, fontSize: fontScale(20), marginBottom: verticalScale(8) }]}>No Active Ride</Text>
+          <Text style={[styles.emptyTitle, { color: colors.text, fontSize: fontScale(20), marginBottom: verticalScale(8) }]}>{t('No Active Ride')}</Text>
           <Text style={[styles.emptySub, { color: colors.subText, fontSize: fontScale(13), textAlign: 'center', lineHeight: verticalScale(19), marginBottom: verticalScale(20) }]}>
             You currently have no active trip. Select a destination on the home map to request a ride.
           </Text>
 
           <TouchableOpacity style={[styles.requestNowBtn, { backgroundColor: colors.primary, height: verticalScale(48), paddingHorizontal: horizontalScale(20), borderRadius: moderateScale(14) }]} onPress={() => router.push('/')}>
             <Ionicons name="navigate-sharp" size={moderateScale(18)} color="#0B1325" style={{ marginRight: horizontalScale(6) }} />
-            <Text style={[styles.requestNowBtnText, { fontSize: fontScale(14) }]}>Request a Ride Now</Text>
+            <Text style={[styles.requestNowBtnText, { fontSize: fontScale(14) }]}>{t('Request a Ride Now')}</Text>
           </TouchableOpacity>
           {showHistory && renderRideHistory()}
         </View>
@@ -942,11 +975,17 @@ export default function PassengerRidesScreen() {
   }
 
   const rideState = activeRide.status || 'ACCEPTED';
-  const driverName = activeRide.driver_name || 'Paul Nkoa';
-  const vehicleInfo = activeRide.vehicle_info || 'Toyota Yaris • CE-992-AA';
+  const driverName = activeRide.driver_name || 'Assigned Driver';
+  const vehicleInfo = activeRide.vehicle_info || 'Verified Vehicle';
   const pickupName = activeRide.pickup_name || paramPickup;
   const destName = activeRide.destination_name || paramDest;
   const selectedPayment = activeRide.payment_method || paramPay;
+  const isSharedRide = Boolean(
+    activeRide.is_shared ||
+    activeRide.shared_ride_id ||
+    activeRide.is_joiner ||
+    params.shared === '1'
+  );
 
   // DYNAMIC VEHICLE TYPE (MOTO vs CAR)
   const isMotoVehicle = activeRide.vehicleType === 'MOTO' || vehicleInfo.includes('TVS') || vehicleInfo.includes('Motorcycle');
@@ -955,29 +994,14 @@ export default function PassengerRidesScreen() {
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
       {/* Map Header */}
       <View style={[styles.mapHeader, { height: isWeb ? '50%' : '44%' }]}>
-        <GoogleDriverMap
+        <RideLiveMap
           rideState={rideState}
-          pickupLat={activeRide.pickup_lat || paramPickupLat}
-          pickupLng={activeRide.pickup_lng || paramPickupLng}
-          destLat={activeRide.destination_lat || paramDestLat}
-          destLng={activeRide.destination_lng || paramDestLng}
-          driverLat={driverPosition?.lat ?? 3.8450}
-          driverLng={driverPosition?.lng ?? 11.5050}
-          isMoving={passengerAccepted}
-          vehicleType={isMotoVehicle ? 'MOTO' : 'CAR'}
-          pickupName={pickupName}
-          destName={destName}
-          distanceKm={Number(activeRide?.distance_km || parseFloat(params.distance_km as string) || 0) || undefined}
-          passengers={participants.map((p: any) => ({
-            id: p.passenger?.id || p.id,
-            name: p.passenger?.username || p.passenger_name || `Passenger ${p.pickup_order || ''}`.trim(),
-            pickupName: p.pickup_name,
-            pickupLat: Number(p.pickup_lat),
-            pickupLng: Number(p.pickup_lng),
-            pickup_order: p.pickup_order,
-          }))}
-          onArrivePickup={handleAutomatedPickupArrival}
-          onArriveDestination={handleAutomatedDestinationArrival}
+          pickupLat={Number(activeRide.pickup_lat ?? paramPickupLat)}
+          pickupLng={Number(activeRide.pickup_lng ?? paramPickupLng)}
+          destinationLat={Number(activeRide.destination_lat ?? paramDestLat)}
+          destinationLng={Number(activeRide.destination_lng ?? paramDestLng)}
+          driverPosition={driverPosition}
+          passengerPosition={passengerTracking.position}
         />
       </View>
 
@@ -990,125 +1014,77 @@ export default function PassengerRidesScreen() {
       <View style={[styles.infoSheetOuter, { backgroundColor: colors.card, padding: horizontalScale(16), borderTopLeftRadius: verticalScale(24), borderTopRightRadius: verticalScale(24), marginTop: verticalScale(-20) }]}>
         {/* Slide-Up Active Ride Info Sheet */}
         <ScrollView style={[styles.infoSheet, { backgroundColor: colors.card }]} contentContainerStyle={{ paddingBottom: 24 }}>
-        {/* CASE A: NO DRIVER AVAILABLE / DECLINED -> SHOW OTHER CATEGORIES */}
-        {noDriverAvailable ? (
-            <View style={[styles.noDriverCard, { backgroundColor: colors.inputBg, borderColor: '#FF5252' }]}>
-              <View style={styles.noDriverHeader}>
-                <Ionicons name="warning" size={20} color="#FF5252" />
-                <Text style={styles.noDriverTitle}>Driver Declined</Text>
-              </View>
-              <Text style={[styles.noDriverSub, { color: colors.subText }]}>
-                The proposed driver was declined. Choose another available driver below:
-              </Text>
-
-            <Text style={[styles.altSectionTitle, { color: colors.text }]}>Available Drivers in Other Categories</Text>
-             {driverProposals.map((alt) => (
-               <View key={alt.id} style={[styles.altDriverCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                 <View style={[styles.altDriverAvatar, { backgroundColor: `${colors.primary}20` }]}>
-                   {alt.driver_profile_picture_url ? (
-                     <Image source={{ uri: alt.driver_profile_picture_url }} style={styles.altDriverAvatarImage} />
-                   ) : (
-                     <Ionicons name="person" size={20} color={colors.primary} />
-                   )}
-                 </View>
-                 <View style={{ flex: 1 }}>
-                  <View style={styles.altHeaderRow}>
-                    <View style={[styles.categoryBadge, { backgroundColor: `${alt.catBadgeColor}20` }]}>
-                      <Text style={[styles.categoryBadgeText, { color: alt.catBadgeColor }]}>{alt.category}</Text>
-                    </View>
-                    <Text style={[styles.altFareText, { color: colors.primary }]}>{alt.fare}</Text>
-                  </View>
-
-                  <Text style={[styles.altDriverName, { color: colors.text }]}>{alt.driverName}</Text>
-                  <Text style={[styles.altVehicleInfo, { color: colors.subText }]}>{alt.vehicleInfo}</Text>
-
-                  <View style={styles.altMetaRow}>
-                    <Ionicons name="star" size={12} color="#FFD600" />
-                    <Text style={[styles.altMetaText, { color: colors.subText }]}>{alt.rating} • {alt.eta}</Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity style={[styles.switchAcceptBtn, { backgroundColor: colors.primary }]} onPress={() => handleSwitchCategoryDriver(alt)}>
-                  <Text style={styles.switchAcceptBtnText}>Switch & Accept</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        ) : !storageReady ? (
-          <View style={{ paddingVertical: verticalScale(20), alignItems: 'center' }}>
-            <ActivityIndicator color={colors.primary} />
-            <Text style={[styles.loadingText, { color: colors.subText, marginTop: verticalScale(12), fontSize: fontScale(14) }]}>Restoring ride state...</Text>
-          </View>
-        ) : (!passengerAccepted || (acceptedRideId && activeRide && acceptedRideId !== String(activeRide.id))) ? (
-          /* CASE B: INITIAL DRIVER MATCH PROPOSAL (PASSENGER CAN ACCEPT OR DECLINE) */
-          <View style={[styles.proposalCard, { backgroundColor: colors.inputBg, borderColor: colors.primary }]}>
+        {activeRide.driver && ['ACCEPTED', 'DRIVER_ARRIVING'].includes(activeRide.status) ? (
+          <Text style={{ color: colors.subText, marginBottom: 10 }}>
+            {passengerTracking.locationError
+              ? t(passengerTracking.locationError)
+              :
+              (rideSocket.isConnected
+                ? t('Your live location is shared with your assigned driver until pickup while this screen is open.')
+                : t('Connecting to live ride updates...'))}
+          </Text>
+        ) : null}
+        {/* ACTIVE RIDE WORKFLOW: SEARCHING OR ASSIGNED */}
+        {!activeRide.driver || activeRide.status === 'REQUESTED' || activeRide.status === 'MATCHING' ? (
+          /* STEP 1: SEARCHING FOR VERIFIED DRIVERS NEARBY */
+          <View style={[styles.proposalCard, { backgroundColor: colors.inputBg, borderColor: colors.secondary }]}>
             <View style={styles.proposalHeader}>
-              <Ionicons name="sparkles" size={18} color={colors.primary} />
-              <Text style={[styles.proposalTitle, { color: colors.primary }]}>
-                Nearby {isMotoVehicle ? 'Moto' : 'Taxi'} Driver Matched!
+              <ActivityIndicator color={colors.secondary} size="small" style={{ marginRight: 8 }} />
+              <Text style={[styles.proposalTitle, { color: colors.secondary }]}>
+                Finding Nearby Verified Drivers...
               </Text>
             </View>
             <Text style={[styles.proposalSub, { color: colors.subText }]}>
-              {params.shared === '1' ? 'You joined this shared ride. Confirm to start tracking the trip.' : 'Review driver profile below and tap "Accept Driver & Start Ride" or "Decline" to see other categories.'}
+              Your ride request has been dispatched to available drivers in your area. Please wait while a driver accepts.
             </Text>
 
-            <View style={[styles.driverCard, { backgroundColor: colors.card, marginBottom: 12 }]}>
-              <View style={[styles.driverAvatar, { backgroundColor: `${colors.primary}20` }]}>
-                {(() => {
-                  const picUrl = activeRide?.driver_profile_picture_url || (driverProposals.length > 0 ? driverProposals[0].driver_profile_picture_url : '');
-                  if (picUrl) {
-                    return <Image source={{ uri: picUrl }} style={styles.driverAvatarImage} onError={() => {}} />;
-                  }
-                  return <Ionicons name={isMotoVehicle ? 'bicycle' : 'person'} size={24} color={colors.primary} />;
-                })()}
+            <View style={{ backgroundColor: colors.card, padding: 12, borderRadius: 12, marginVertical: 10, gap: 8 }}>
+              <View style={styles.routeRow}>
+                <Ionicons name="radio-button-on" size={14} color={colors.primary} />
+                <Text style={[styles.routeText, { color: colors.text }]}>{pickupName}</Text>
               </View>
-
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.driverName, { color: colors.text }]}>{driverName}</Text>
-                <Text style={[styles.carInfo, { color: colors.subText }]}>{vehicleInfo}</Text>
-                <View style={styles.ratingBadge}>
-                  <Ionicons name="star" size={12} color="#FFD600" />
-                  <Text style={[styles.ratingText, { color: colors.text }]}>4.9 (42 rides) • 2 mins to pickup</Text>
-                </View>
+              <View style={styles.routeRow}>
+                <Ionicons name="location-sharp" size={14} color="#FF5252" />
+                <Text style={[styles.routeText, { color: colors.text }]}>{destName}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.cardBorder }}>
+                <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 15 }}>
+                  {activeRide.estimated_fare ? `${Number(activeRide.estimated_fare).toLocaleString()} FCFA` : `${params.fare || 1200} FCFA`}
+                </Text>
+                <Text style={{ color: colors.subText, fontSize: 13, fontWeight: '600' }}>
+                  Payment: {selectedPayment}
+                </Text>
               </View>
             </View>
 
-            {/* EXPLICIT ACCEPTANCE & DECLINE ACTION BUTTONS */}
-            <View style={styles.proposalActionsRow}>
-              <TouchableOpacity style={styles.declineBtn} onPress={handleDeclineDriver}>
-                <Ionicons name="close-circle" size={16} color="#FF5252" style={{ marginRight: 4 }} />
-                <Text style={styles.declineBtnText}>Decline</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.acceptDriverBtn, { backgroundColor: colors.primary }]} onPress={handlePassengerAcceptDriver}>
-                <Ionicons name="checkmark-circle" size={18} color="#0B1325" style={{ marginRight: 6 }} />
-                <Text style={styles.acceptDriverBtnText}>Accept Driver & Start Ride</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.declineBtn} onPress={handleCancelRide}>
+              <Ionicons name="close-circle" size={16} color="#FF5252" style={{ marginRight: 4 }} />
+              <Text style={styles.declineBtnText}>{t('Cancel Ride Request')}</Text>
+            </TouchableOpacity>
           </View>
         ) : (
-          /* CASE C: TRIP IN PROGRESS (AFTER PASSENGER ACCEPTS DRIVER) */
+          /* STEP 2: DRIVER ASSIGNED & ON ROUTE / IN PROGRESS */
           <>
             {/* Stage Status Banner */}
-            <View style={[styles.stateBanner, { backgroundColor: rideState === 'IN_PROGRESS' ? 'rgba(255, 159, 28, 0.15)' : 'rgba(0, 230, 118, 0.15)' }]}>
+            <View style={[styles.stateBanner, { backgroundColor: rideState === 'IN_PROGRESS' ? 'rgba(255, 159, 28, 0.15)' : rideState === 'DRIVER_AT_PICKUP' ? 'rgba(0, 230, 118, 0.15)' : 'rgba(41, 182, 246, 0.15)' }]}>
               <Ionicons name={isMotoVehicle ? 'bicycle' : 'car'} size={16} color={rideState === 'IN_PROGRESS' ? colors.accent : colors.primary} />
               <Text style={[styles.stateBannerText, { color: rideState === 'IN_PROGRESS' ? colors.accent : colors.primary }]}>
-                {rideState === 'ACCEPTED'
-                  ? `STAGE 1: DRIVER EN ROUTE TO PICK YOU UP (${pickupName.toUpperCase()})`
-                  : `STAGE 2: TRIP IN PROGRESS TO DESTINATION (${destName.toUpperCase()})`}
+                {rideState === 'DRIVER_AT_PICKUP'
+                  ? `STAGE 2: DRIVER ARRIVED AT PICKUP LOCATION (${pickupName.toUpperCase()})`
+                  : rideState === 'IN_PROGRESS'
+                  ? `STAGE 3: TRIP IN PROGRESS TO DESTINATION (${destName.toUpperCase()})`
+                  : `STAGE 1: DRIVER EN ROUTE TO PICK YOU UP (${pickupName.toUpperCase()})`}
               </Text>
             </View>
 
             {/* Accepted Driver Card */}
             <View style={[styles.driverCard, { backgroundColor: colors.inputBg }]}>
               <View style={[styles.driverAvatar, { backgroundColor: `${colors.primary}20` }]}>
-                {(() => {
-                  const picUrl = activeRide?.driver_profile_picture_url || (driverProposals.length > 0 ? driverProposals[0].driver_profile_picture_url : '');
-                  if (picUrl) {
-                    return <Image source={{ uri: picUrl }} style={styles.driverAvatarImage} onError={() => {}} />;
-                  }
-                  return <Ionicons name={isMotoVehicle ? 'bicycle' : 'person'} size={24} color={colors.primary} />;
-                })()}
+                {activeRide?.driver_profile_picture_url ? (
+                  <Image source={{ uri: activeRide.driver_profile_picture_url }} style={styles.driverAvatarImage} onError={() => {}} />
+                ) : (
+                  <Ionicons name={isMotoVehicle ? 'bicycle' : 'person'} size={24} color={colors.primary} />
+                )}
               </View>
 
               <View style={{ flex: 1 }}>
@@ -1116,7 +1092,9 @@ export default function PassengerRidesScreen() {
                 <Text style={[styles.carInfo, { color: colors.subText }]}>{vehicleInfo}</Text>
                 <View style={styles.ratingBadge}>
                   <Ionicons name="star" size={12} color="#FFD600" />
-                  <Text style={[styles.ratingText, { color: colors.text }]}>4.9 (42 rides)</Text>
+                  <Text style={[styles.ratingText, { color: colors.text }]}>
+                    {activeRide.driver_rating ?? 0} ({activeRide.driver_total_rides ?? 0} rides)
+                  </Text>
                 </View>
               </View>
 
@@ -1125,10 +1103,22 @@ export default function PassengerRidesScreen() {
               </TouchableOpacity>
             </View>
 
+            {activeRide.status === 'ARRIVED_AT_DESTINATION' && selectedPayment === 'CASH' && (
+              <View style={{ backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 12, borderRadius: 12, marginVertical: 8, borderWidth: 1 }}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginBottom: 4 }}>{t('Cash payment PIN')}</Text>
+                <Text style={{ color: colors.subText, fontSize: 12, marginBottom: 8 }}>
+                  {t('Pay the driver in cash, then show this one-time PIN to confirm payment.')}
+                </Text>
+                <Text style={{ color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: 5 }}>
+                  {activeRide.cash_otp || '----'}
+                </Text>
+              </View>
+            )}
+
             {/* WHATSAPP & SECURITY CONTACT LIVE TRIP SHARE BUTTON */}
             <TouchableOpacity style={[styles.shareWhatsAppBtn, { backgroundColor: '#25D366' }]} onPress={handleShareTripWhatsApp}>
               <Ionicons name="logo-whatsapp" size={18} color="#FFF" style={{ marginRight: 6 }} />
-              <Text style={styles.shareWhatsAppBtnText}>Share Live Trip via WhatsApp / Security</Text>
+              <Text style={styles.shareWhatsAppBtnText}>{t('Share Live Trip via WhatsApp / Security')}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -1177,7 +1167,7 @@ export default function PassengerRidesScreen() {
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={[styles.participantFare, { color: colors.primary }]}>Initiator</Text>
+                  <Text style={[styles.participantFare, { color: colors.primary }]}>{t('Initiator')}</Text>
                 </View>
               </View>
             )}
@@ -1185,8 +1175,8 @@ export default function PassengerRidesScreen() {
             {/* Joined Passengers List */}
             {participants.length === 0 && !activeRide?.is_joiner ? (
               <View style={{ paddingVertical: 10 }}>
-                <Text style={[styles.participantEmpty, { color: colors.subText }]}>No passengers have joined yet.</Text>
-                <Text style={[styles.participantEmpty, { color: colors.subText, fontSize: 11 }]}>Compatible riders along your route can join this ride.</Text>
+                <Text style={[styles.participantEmpty, { color: colors.subText }]}>{t('No passengers have joined yet.')}</Text>
+                <Text style={[styles.participantEmpty, { color: colors.subText, fontSize: 11 }]}>{t('Compatible riders along your route can join this ride.')}</Text>
               </View>
             ) : (
               participants.map((p: any) => {
@@ -1222,34 +1212,33 @@ export default function PassengerRidesScreen() {
           <View style={[styles.otpCard, { backgroundColor: colors.inputBg, borderColor: colors.accent }]}>
             <View style={styles.otpHeader}>
               <Ionicons name="key" size={18} color={colors.accent} />
-              <Text style={[styles.otpTitle, { color: colors.accent }]}>{t('cashPinTitle')}</Text>
+              <Text style={[styles.otpTitle, { color: colors.accent }]}>{t('Cash payment PIN')}</Text>
             </View>
-            <Text style={[styles.otpSub, { color: colors.subText }]}>{t('givePinSub')}</Text>
-            
-            <View style={[styles.pinBox, { backgroundColor: colors.bg }]}>
-              <Text style={[styles.pinText, { color: colors.primary }]}>{cashPin}</Text>
-            </View>
-
-            {isVerified ? (
-              <View style={styles.verifiedBanner}>
-                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
-                <Text style={[styles.verifiedText, { color: colors.primary }]}>{t('cashConfirmed')}</Text>
-              </View>
-            ) : (
-              <View style={styles.verifyRow}>
-                <TextInput
-                  style={[styles.pinInput, { backgroundColor: colors.bg, color: colors.text }]}
-                  placeholder="Enter PIN"
-                  placeholderTextColor={colors.subText}
-                  keyboardType="number-pad"
-                  value={inputPin}
-                  onChangeText={setInputPin}
-                  maxLength={4}
-                />
-                <TouchableOpacity style={[styles.verifyBtn, { backgroundColor: colors.accent }]} onPress={verifyPin}>
-                  <Text style={styles.verifyBtnText}>{t('confirmCash')}</Text>
+            {isSharedRide ? (
+              <>
+                <Text style={[styles.otpSub, { color: colors.subText }]}>
+                  Cash PIN confirmation is not available for shared rides yet. Please use mobile money.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.verifyBtn, { backgroundColor: colors.accent, paddingVertical: 10 }]}
+                  onPress={() => setActiveRide((current: any) => current ? { ...current, payment_method: 'MTN_MOMO' } : current)}
+                >
+                  <Text style={styles.verifyBtnText}>{t('Use mobile money')}</Text>
                 </TouchableOpacity>
-              </View>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.otpSub, { color: colors.subText }]}>
+                  Pay the driver in cash, then show them this PIN. The driver enters it to confirm payment.
+                </Text>
+                <View style={[styles.pinBox, { backgroundColor: colors.bg }]}>
+                  {activeRide?.status === 'ARRIVED_AT_DESTINATION' ? (
+                    <Text style={[styles.pinText, { color: colors.primary }]}>{activeRide.cash_otp || '----'}</Text>
+                  ) : (
+                    <Text style={[styles.otpSub, { color: colors.subText }]}>{t('Your PIN appears when you arrive at the destination.')}</Text>
+                  )}
+                </View>
+              </>
             )}
           </View>
         ) : (
@@ -1275,7 +1264,7 @@ export default function PassengerRidesScreen() {
           onPress={handleCancelRide}
         >
           <Ionicons name="close-circle" size={18} color="#FF5252" style={{ marginRight: 6 }} />
-          <Text style={styles.cancelRideBtnText}>Cancel Ride Request</Text>
+          <Text style={styles.cancelRideBtnText}>{t('Cancel Ride Request')}</Text>
         </TouchableOpacity>
         {showHistory && renderRideHistory()}
       </ScrollView>
@@ -1296,7 +1285,7 @@ export default function PassengerRidesScreen() {
               </View>
 
               <View style={{ flex: 1 }}>
-                <Text style={[styles.paymentModalTitle, { color: colors.text }]}>Arrived at Destination!</Text>
+                <Text style={[styles.paymentModalTitle, { color: colors.text }]}>{t('Arrived at Destination!')}</Text>
                 <Text style={[styles.paymentModalSub, { color: colors.subText }]}>
                   Safe arrival at {destName}. Please settle payment with driver {driverName}.
                 </Text>
@@ -1353,7 +1342,7 @@ export default function PassengerRidesScreen() {
               return (
                 <>
                   <View style={[styles.receiptCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.receiptTitle, { color: colors.subText }]}>TRIP FARE RECEIPT</Text>
+                    <Text style={[styles.receiptTitle, { color: colors.subText }]}>{t('TRIP FARE RECEIPT')}</Text>
 
                   {/* Standard Base & Distance Lines */}
                   <View style={styles.receiptRow}>
@@ -1450,23 +1439,35 @@ export default function PassengerRidesScreen() {
                 {/* PAYMENT METHOD AUTHORIZATION */}
                 {selectedPayment === 'CASH' ? (
                   <View style={[styles.cashBox, { backgroundColor: colors.inputBg }]}>
-                    <Text style={[styles.pinPromptLabel, { color: colors.text }]}>
-                      Give 4-Digit Cash OTP PIN ({activeRide?.cash_otp || cashPin || '4892'}) to driver {driverName}:
-                    </Text>
-                    <View style={styles.verifyRow}>
-                      <TextInput
-                        style={[styles.pinInput, { backgroundColor: colors.card, color: colors.text }]}
-                        placeholder="Enter PIN"
-                        placeholderTextColor={colors.subText}
-                        keyboardType="number-pad"
-                        value={inputPin}
-                        onChangeText={setInputPin}
-                        maxLength={4}
-                      />
-                      <TouchableOpacity style={[styles.verifyBtn, { backgroundColor: colors.primary }]} onPress={verifyPin}>
-                        <Text style={[styles.verifyBtnText, { color: '#0B1325' }]}>Confirm Cash</Text>
-                      </TouchableOpacity>
-                    </View>
+                    {isSharedRide ? (
+                      <>
+                        <Text style={[styles.pinPromptLabel, { color: colors.text }]}>
+                          Cash PIN confirmation is not available for shared rides yet. Please use mobile money.
+                        </Text>
+                        <TouchableOpacity
+                          style={[styles.verifyBtn, { backgroundColor: colors.primary, paddingVertical: 10 }]}
+                          onPress={() => setActiveRide((current: any) => current ? { ...current, payment_method: 'MTN_MOMO' } : current)}
+                        >
+                          <Text style={[styles.verifyBtnText, { color: '#0B1325' }]}>{t('Use mobile money')}</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={[styles.pinPromptLabel, { color: colors.text }]}>
+                          {activeRide?.status === 'ARRIVED_AT_DESTINATION'
+                            ? `Pay ${myAmountDue.toLocaleString()} FCFA in cash, then show this PIN to driver ${driverName}:`
+                            : 'Your cash payment PIN will appear when you arrive at the destination.'}
+                        </Text>
+                        {activeRide?.status === 'ARRIVED_AT_DESTINATION' && (
+                          <Text style={{ color: colors.primary, fontSize: 24, fontWeight: '900', letterSpacing: 6, textAlign: 'center', paddingVertical: 8 }}>
+                            {activeRide.cash_otp || '----'}
+                          </Text>
+                        )}
+                        <Text style={[styles.pinPromptLabel, { color: colors.subText, marginBottom: 0 }]}>
+                          The driver enters this code after receiving the cash. You can rate the driver after payment is confirmed.
+                        </Text>
+                      </>
+                    )}
                   </View>
                 ) : (
                   <View style={[styles.campayCard, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
@@ -1516,7 +1517,7 @@ export default function PassengerRidesScreen() {
                     <View style={styles.campayDemoBadge}>
                       <Ionicons name="shield-checkmark" size={13} color={colors.primary} />
                       <Text style={[styles.campayDemoText, { color: colors.subText }]}>
-                        Campay Gateway • Demo mode (prompts 25 FCFA on phone, saves {myAmountDue.toLocaleString()} FCFA in receipt)
+                        Campay Gateway • Secure Mobile Money payment via {momoOperator}
                       </Text>
                     </View>
 
@@ -1539,7 +1540,7 @@ export default function PassengerRidesScreen() {
                             {campayLoading ? (
                               <ActivityIndicator color="#0B1325" size="small" />
                             ) : (
-                              <Text style={styles.campayCheckBtnText}>Check Status Now</Text>
+                              <Text style={styles.campayCheckBtnText}>{t('Check Status Now')}</Text>
                             )}
                           </TouchableOpacity>
 
@@ -1547,7 +1548,7 @@ export default function PassengerRidesScreen() {
                             style={[styles.campayCancelBtn, { borderColor: colors.cardBorder }]}
                             onPress={() => setCampayPolling(false)}
                           >
-                            <Text style={[styles.campayCancelBtnText, { color: colors.subText }]}>Cancel</Text>
+                            <Text style={[styles.campayCancelBtnText, { color: colors.subText }]}>{t('Cancel')}</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -1594,7 +1595,7 @@ export default function PassengerRidesScreen() {
         visible={showRatingModal}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowRatingModal(false)}
+        onRequestClose={() => { void finishRatingFlow(); }}
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.paymentModalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -1603,12 +1604,17 @@ export default function PassengerRidesScreen() {
                 <Ionicons name="star" size={26} color="#FFD600" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.paymentModalTitle, { color: colors.text }]}>Rate Your Driver</Text>
+                <Text style={[styles.paymentModalTitle, { color: colors.text }]}>{t('Rate Your Driver')}</Text>
                 <Text style={[styles.paymentModalSub, { color: colors.subText }]}>
                   {driverName}
                 </Text>
               </View>
             </View>
+            {ratingPaymentMessage ? (
+              <Text style={{ color: colors.primary, textAlign: 'center', marginTop: 8, fontWeight: '700' }}>
+                {ratingPaymentMessage}
+              </Text>
+            ) : null}
 
             {/* Star selector */}
             <View style={{ flexDirection: 'row', justifyContent: 'center', marginVertical: 16, gap: 8 }}>
@@ -1638,7 +1644,7 @@ export default function PassengerRidesScreen() {
             <View style={[styles.ratingCommentBox, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
               <TextInput
                 style={[styles.pinInput, { backgroundColor: 'transparent', color: colors.text, textAlignVertical: 'top', padding: 0 }]}
-                placeholder="Add a comment about your ride..."
+                placeholder={t('Add a comment about your ride...')}
                 placeholderTextColor={colors.subText}
                 value={ratingComment}
                 onChangeText={setRatingComment}
@@ -1651,9 +1657,9 @@ export default function PassengerRidesScreen() {
             <View style={styles.ratingActionRow}>
               <TouchableOpacity
                 style={styles.ratingSkipBtn}
-                onPress={() => { setShowRatingModal(false); setRatingComment(''); setRatingScore(5); }}
+                onPress={() => { void finishRatingFlow(); }}
               >
-                <Text style={styles.ratingSkipText}>Skip</Text>
+                <Text style={styles.ratingSkipText}>{t('Skip')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.ratingSubmitBtn}
@@ -1662,7 +1668,7 @@ export default function PassengerRidesScreen() {
               >
                 {submittingRating
                   ? <ActivityIndicator size="small" color="#0B1325" />
-                  : <Text style={styles.ratingSubmitText}>Submit Rating</Text>
+                  : <Text style={styles.ratingSubmitText}>{t('Submit Rating')}</Text>
                 }
               </TouchableOpacity>
             </View>

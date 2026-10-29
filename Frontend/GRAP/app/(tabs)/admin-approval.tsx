@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../services/api';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 
 const { width: SW } = Dimensions.get('window');
 type AdminTab = 'OVERVIEW' | 'CHARTS' | 'LIVE_FEED' | 'FLEET';
@@ -65,6 +66,7 @@ function FinRow({ label, value, color, icon }: { label: string; value: string; c
 export default function AdminApprovalScreen() {
   const { colors } = useTheme();
   const { user }   = useAuth();
+  const { t } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<AdminTab>('OVERVIEW');
   const [metrics,   setMetrics]   = useState<any | null>(null);
@@ -94,9 +96,9 @@ export default function AdminApprovalScreen() {
     setActionId(id);
     try {
       await api.verifyDriver(id, status);
-      Alert.alert('Done', `Driver set to ${status}`);
+      Alert.alert(t('Done'), `${t('Driver set to')} ${t(status)}`);
       loadAdminData();
-    } catch (e: any) { Alert.alert('Error', e.message || 'Failed'); }
+    } catch (e: any) { Alert.alert(t('Error'), e.message || t('Failed')); }
     finally          { setActionId(null); }
   };
 
@@ -130,10 +132,10 @@ export default function AdminApprovalScreen() {
                 <Ionicons name="shield-checkmark" size={17} color="#FFD600" />
               </View>
               <View>
-                <Text style={s.heroTitle}>GRAP Command Center</Text>
+                <Text style={s.heroTitle}>{t('GRAP Command Center')}</Text>
                 <View style={s.pulseRow}>
                   <View style={s.dot} />
-                  <Text style={s.pulseText}>LIVE SYSTEM â€¢ YAOUNDÃ‰</Text>
+                  <Text style={s.pulseText}>{t('LIVE SYSTEM • YAOUNDÉ')}</Text>
                 </View>
               </View>
             </View>
@@ -146,20 +148,20 @@ export default function AdminApprovalScreen() {
 
           {/* Vault */}
           <View style={s.vaultBox}>
-            <Text style={s.vaultEye}>PLATFORM NET REVENUE (GRAP VAULT)</Text>
+            <Text style={s.vaultEye}>{t('PLATFORM NET REVENUE (GRAP VAULT)')}</Text>
             <Text style={s.vaultNum}>{f(fin.platform_vault_float)} FCFA</Text>
             <Text style={s.vaultSub}>
-              15% of {f(fin.total_gross_volume)} FCFA total ride volume
+              {t('15% of')} {f(fin.total_gross_volume)} FCFA {t('total ride volume')}
             </Text>
           </View>
 
           {/* 4-stat strip */}
           <View style={s.strip}>
             {[
-              { lbl: 'Gross GMV', val: f(fin.total_gross_volume), color: '#FFFFFF' },
-              { lbl: 'Driver Net (85%)', val: f(fin.total_driver_net_earnings), color: '#69F0AE' },
-              { lbl: 'Disbursed', val: f(fin.total_disbursed_momo), color: '#FF8A80' },
-              { lbl: 'Avg Ticket', val: f(fin.average_ticket_fcfa), color: '#FFD600' },
+              { lbl: t('Gross GMV'), val: f(fin.total_gross_volume), color: '#FFFFFF' },
+              { lbl: t('Driver Net (85%)'), val: f(fin.total_driver_net_earnings), color: '#69F0AE' },
+              { lbl: t('Disbursed'), val: f(fin.total_disbursed_momo), color: '#FF8A80' },
+              { lbl: t('Avg Ticket'), val: f(fin.average_ticket_fcfa), color: '#FFD600' },
             ].map((item, i) => (
               <React.Fragment key={i}>
                 {i > 0 && <View style={s.stripDiv} />}
@@ -178,10 +180,10 @@ export default function AdminApprovalScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 14, gap: 8, paddingVertical: 9 }}>
           {[
-            { key: 'OVERVIEW',  label: 'Overview',    icon: 'speedometer-outline' },
-            { key: 'CHARTS',    label: 'Financials',  icon: 'analytics-outline' },
-            { key: 'LIVE_FEED', label: 'Live Feed',   icon: 'pulse-outline' },
-            { key: 'FLEET',     label: `Approvals (${fl.pending_approval_drivers || 0})`, icon: 'car-outline' },
+            { key: 'OVERVIEW',  label: t('Overview'),    icon: 'speedometer-outline' },
+            { key: 'CHARTS',    label: t('Financials'),  icon: 'analytics-outline' },
+            { key: 'LIVE_FEED', label: t('Live Feed'),   icon: 'pulse-outline' },
+            { key: 'FLEET',     label: `${t('Approvals')} (${fl.pending_approval_drivers || 0})`, icon: 'car-outline' },
           ].map(t => (
             <TabPill key={t.key} label={t.label} icon={t.icon}
               active={activeTab === t.key} onPress={() => setActiveTab(t.key as AdminTab)} />
@@ -194,47 +196,47 @@ export default function AdminApprovalScreen() {
         {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• OVERVIEW â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
         {activeTab === 'OVERVIEW' && (<>
 
-          <Text style={s.sec}>Operational KPIs</Text>
+          <Text style={s.sec}>{t('Operational KPIs')}</Text>
           <View style={s.grid4}>
-            <StatCard icon="navigate-circle" label="Total Requests" value={String(ops.total_rides_requested || 0)}
-              sub={`${ops.completed_rides || 0} completed`} iconColor="#4FC3F7" delay={0} />
-            <StatCard icon="checkmark-done-circle" label="Completion" value={`${ops.completion_rate_pct || 0}%`}
-              sub={`${ops.cancelled_rides || 0} cancelled`} iconColor="#69F0AE" delay={60} />
-            <StatCard icon="people" label="Users" value={String(fl.total_users || 0)}
-              sub={`${fl.total_passengers || 0} riders`} iconColor="#CE93D8" delay={120} />
-            <StatCard icon="car-sport" label="Drivers" value={String(fl.total_drivers || 0)}
-              sub={`${fl.online_drivers_now || 0} online`} iconColor="#FFB74D" delay={180} />
+            <StatCard icon="navigate-circle" label={t('Total Requests')} value={String(ops.total_rides_requested || 0)}
+              sub={`${ops.completed_rides || 0} ${t('completed')}`} iconColor="#4FC3F7" delay={0} />
+            <StatCard icon="checkmark-done-circle" label={t('Completion')} value={`${ops.completion_rate_pct || 0}%`}
+              sub={`${ops.cancelled_rides || 0} ${t('cancelled')}`} iconColor="#69F0AE" delay={60} />
+            <StatCard icon="people" label={t('Users')} value={String(fl.total_users || 0)}
+              sub={`${fl.total_passengers || 0} ${t('riders')}`} iconColor="#CE93D8" delay={120} />
+            <StatCard icon="car-sport" label={t('Drivers')} value={String(fl.total_drivers || 0)}
+              sub={`${fl.online_drivers_now || 0} ${t('online')}`} iconColor="#FFB74D" delay={180} />
           </View>
 
           {/* FINANCIAL ACCOUNTING */}
-          <Text style={s.sec}>Revenue Accounting</Text>
+          <Text style={s.sec}>{t('Revenue Accounting')}</Text>
           <View style={s.card}>
             <View style={s.cardHead}>
               <View style={s.cardIconBox}><Ionicons name="wallet" size={15} color="#FFD600" /></View>
-              <Text style={s.cardTitle}>Financial Breakdown</Text>
+              <Text style={s.cardTitle}>{t('Financial Breakdown')}</Text>
             </View>
             <View style={s.divLine} />
-            <FinRow label="Total Ride Volume (GMV)" value={`${f(fin.total_gross_volume)} FCFA`} color="#FFFFFF" icon="cash-outline" />
-            <FinRow label="  Driver Net Owed (85%)" value={`âˆ’ ${f(fin.total_driver_net_earnings)} FCFA`} color="#69F0AE" icon="person-outline" />
-            <FinRow label="  Platform Commission (15%)" value={`= ${f(fin.platform_vault_float)} FCFA`} color="#FFD600" icon="shield-checkmark-outline" />
+            <FinRow label={t('Total Ride Volume (GMV)')} value={`${f(fin.total_gross_volume)} FCFA`} color="#FFFFFF" icon="cash-outline" />
+            <FinRow label={`  ${t('Driver Net Owed (85%)')}`} value={`− ${f(fin.total_driver_net_earnings)} FCFA`} color="#69F0AE" icon="person-outline" />
+            <FinRow label={`  ${t('Platform Commission (15%)')}`} value={`= ${f(fin.platform_vault_float)} FCFA`} color="#FFD600" icon="shield-checkmark-outline" />
             <View style={s.divLine} />
-            <FinRow label="Driver MoMo Disbursed" value={`âˆ’ ${f(fin.total_disbursed_momo)} FCFA`} color="#FF8A80" icon="arrow-up-circle-outline" />
-            <FinRow label="Driver Pending Payout" value={`${f(fin.driver_unpaid_balance || 0)} FCFA`} color="#FFB74D" icon="time-outline" />
+            <FinRow label={t('Driver MoMo Disbursed')} value={`− ${f(fin.total_disbursed_momo)} FCFA`} color="#FF8A80" icon="arrow-up-circle-outline" />
+            <FinRow label={t('Driver Pending Payout')} value={`${f(fin.driver_unpaid_balance || 0)} FCFA`} color="#FFB74D" icon="time-outline" />
             <View style={s.vaultHighlight}>
-              <Text style={s.vaultHlLbl}>GRAP Vault (Net Revenue)</Text>
+              <Text style={s.vaultHlLbl}>{t('GRAP Vault (Net Revenue)')}</Text>
               <Text style={s.vaultHlVal}>{f(fin.platform_vault_float)} FCFA</Text>
             </View>
           </View>
 
           {/* FLEET STATUS */}
-          <Text style={s.sec}>Fleet Status</Text>
+          <Text style={s.sec}>{t('Fleet Status')}</Text>
           <View style={s.card}>
             <View style={s.fleetRow}>
               {[
-                { num: fl.verified_drivers || 0, lbl: 'Verified', color: '#69F0AE' },
-                { num: fl.pending_approval_drivers || 0, lbl: 'Pending', color: '#FFD600' },
-                { num: fl.online_drivers_now || 0, lbl: 'Online', color: '#4FC3F7' },
-                { num: ops.shared_rides_count || 0, lbl: 'Shared', color: '#CE93D8' },
+                { num: fl.verified_drivers || 0, lbl: t('Verified'), color: '#69F0AE' },
+                { num: fl.pending_approval_drivers || 0, lbl: t('Pending'), color: '#FFD600' },
+                { num: fl.online_drivers_now || 0, lbl: t('Online'), color: '#4FC3F7' },
+                { num: ops.shared_rides_count || 0, lbl: t('Shared'), color: '#CE93D8' },
               ].map((item, i) => (
                 <React.Fragment key={i}>
                   {i > 0 && <View style={s.fleetDiv} />}
@@ -248,10 +250,10 @@ export default function AdminApprovalScreen() {
           </View>
 
           {/* HOTSPOTS */}
-          <Text style={s.sec}>Search Hotspots</Text>
+          <Text style={s.sec}>{t('Search Hotspots')}</Text>
           <View style={s.card}>
             {spots.length === 0
-              ? <Text style={s.empty}>No hotspot data yet.</Text>
+              ? <Text style={s.empty}>{t('No hotspot data yet.')}</Text>
               : spots.map((h: any, i: number) => {
                 const hColor = i === 0 ? '#FFD600' : i === 1 ? '#69F0AE' : '#4FC3F7';
                 return (
@@ -278,7 +280,7 @@ export default function AdminApprovalScreen() {
           <Text style={s.sec}>7-Day Revenue Trend</Text>
           <View style={s.card}>
             <View style={s.legRow}>
-              <View style={s.legItem}><View style={[s.legDot, { backgroundColor: '#4FC3F7' }]} /><Text style={s.legTxt}>Gross</Text></View>
+              <View style={s.legItem}><View style={[s.legDot, { backgroundColor: '#4FC3F7' }]} /><Text style={s.legTxt}>{t('Gross')}</Text></View>
               <View style={s.legItem}><View style={[s.legDot, { backgroundColor: '#FFD600' }]} /><Text style={s.legTxt}>15% Commission</Text></View>
             </View>
             <View style={s.bars}>
@@ -308,10 +310,10 @@ export default function AdminApprovalScreen() {
             )}
           </View>
 
-          <Text style={s.sec}>Category Distribution</Text>
+          <Text style={s.sec}>{t('Category Distribution')}</Text>
           <View style={s.card}>
             {cats.length === 0
-              ? <Text style={s.empty}>No category data.</Text>
+              ? <Text style={s.empty}>{t('No category data.')}</Text>
               : cats.map((cat: any) => {
                 const pct = (ops.completed_rides || 0) > 0 ? Math.round((cat.completed_rides / ops.completed_rides) * 100) : 0;
                 return (
@@ -326,27 +328,27 @@ export default function AdminApprovalScreen() {
               })}
           </View>
 
-          <Text style={s.sec}>Payment Gateway Mix</Text>
+          <Text style={s.sec}>{t('Payment Gateway Mix')}</Text>
           <View style={s.card}>
             <View style={s.gwRow}><Text style={s.gwLbl}>ðŸŸ¡ Campay MoMo</Text><Text style={s.gwPct}>{gw.momo_share_pct}%</Text></View>
             <View style={s.gwTrack}>
               <View style={[s.gwMomo, { width: `${gw.momo_share_pct}%` as any }]} />
               <View style={[s.gwCash, { width: `${100 - gw.momo_share_pct}%` as any }]} />
             </View>
-            <View style={s.gwRow}><Text style={s.gwSubLbl}>ðŸ’µ Cash OTP</Text><Text style={s.gwPct}>{(100 - gw.momo_share_pct).toFixed(1)}%</Text></View>
+            <View style={s.gwRow}><Text style={s.gwSubLbl}>💵 {t('Cash OTP')}</Text><Text style={s.gwPct}>{(100 - gw.momo_share_pct).toFixed(1)}%</Text></View>
           </View>
         </>)}
 
         {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• LIVE FEED â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
         {activeTab === 'LIVE_FEED' && (<>
           <View style={s.liveHeader}>
-            <Text style={s.sec}>Real-Time Stream</Text>
-            <View style={s.liveBadge}><View style={s.dot} /><Text style={s.liveBadgeTxt}>LIVE</Text></View>
+            <Text style={s.sec}>{t('Real-Time Stream')}</Text>
+            <View style={s.liveBadge}><View style={s.dot} /><Text style={s.liveBadgeTxt}>{t('LIVE')}</Text></View>
           </View>
           {feed.length === 0 ? (
             <View style={[s.card, { alignItems: 'center', paddingVertical: 36 }]}>
               <Ionicons name="pulse-outline" size={36} color="#556678" style={{ marginBottom: 10 }} />
-              <Text style={s.empty}>No recent rides.</Text>
+              <Text style={s.empty}>{t('No recent rides.')}</Text>
             </View>
           ) : feed.map((r: any) => {
             const done   = r.status === 'COMPLETED';
@@ -359,7 +361,7 @@ export default function AdminApprovalScreen() {
                   <View style={s.feedTop}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <Text style={s.feedId}>Ride #{r.id}</Text>
-                      {r.is_shared && <View style={s.sharedBadge}><Text style={s.sharedTxt}>SHARED</Text></View>}
+                      {r.is_shared && <View style={s.sharedBadge}><Text style={s.sharedTxt}>{t('SHARED')}</Text></View>}
                     </View>
                     <View style={[s.statusTag, { backgroundColor: `${sc}15`, borderColor: `${sc}40` }]}>
                       <Text style={[s.statusTxt, { color: sc }]}>{r.status}</Text>
@@ -383,13 +385,13 @@ export default function AdminApprovalScreen() {
         {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• FLEET APPROVALS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
         {activeTab === 'FLEET' && (<>
           <View style={s.queueHead}>
-            <Text style={s.sec}>Verification Queue</Text>
+            <Text style={s.sec}>{t('Verification Queue')}</Text>
             <View style={s.pendBadge}><Text style={s.pendTxt}>{fl.pending_approval_drivers || 0} Pending</Text></View>
           </View>
           {drivers.length === 0 ? (
             <View style={[s.card, { alignItems: 'center', paddingVertical: 36 }]}>
               <Ionicons name="checkmark-done-circle" size={40} color="#69F0AE" style={{ marginBottom: 10 }} />
-              <Text style={s.empty}>All drivers verified!</Text>
+              <Text style={s.empty}>{t('All drivers verified!')}</Text>
             </View>
           ) : drivers.map((drv) => {
             const verified   = drv.verification_status === 'VERIFIED';
@@ -421,14 +423,14 @@ export default function AdminApprovalScreen() {
                     <TouchableOpacity style={s.approveBtn} onPress={() => handleVerify(drv.id, 'VERIFIED')} disabled={actioning}>
                       {actioning ? <ActivityIndicator color="#0B1325" size="small" /> : <>
                         <Ionicons name="checkmark" size={14} color="#0B1325" />
-                        <Text style={s.approveTxt}>Approve</Text>
+                        <Text style={s.approveTxt}>{t('Approve')}</Text>
                       </>}
                     </TouchableOpacity>
                   )}
                   {drv.verification_status !== 'REJECTED' && (
                     <TouchableOpacity style={s.rejectBtn} onPress={() => handleVerify(drv.id, 'REJECTED')} disabled={actioning}>
                       <Ionicons name="close" size={14} color="#FF5252" />
-                      <Text style={s.rejectTxt}>Reject</Text>
+                      <Text style={s.rejectTxt}>{t('Reject')}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -594,4 +596,3 @@ const s = StyleSheet.create({
 
   empty: { color: '#556678', fontSize: 13, textAlign: 'center' },
 });
-
